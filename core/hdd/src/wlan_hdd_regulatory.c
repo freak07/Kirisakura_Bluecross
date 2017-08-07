@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2018 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -60,6 +60,9 @@
 #define REG_RULE_5500_5720    REG_RULE(5500-10, 5720+10, 160, 0, 20, \
 		NL80211_RRF_PASSIVE_SCAN | NL80211_RRF_NO_IBSS)
 
+#define REG_RULE_5500_5700    REG_RULE(5500-10, 5700+10, 160, 0, 20, \
+		NL80211_RRF_PASSIVE_SCAN | NL80211_RRF_NO_IBSS)
+
 #define REG_RULE_5745_5925    REG_RULE(5745-10, 5925+10, 80, 0, 20, \
 		NL80211_RRF_PASSIVE_SCAN | NL80211_RRF_NO_IBSS)
 
@@ -68,15 +71,12 @@ static bool init_by_reg_core;
 
 static const struct ieee80211_regdomain
 hdd_world_regrules_60_61_62 = {
-	.n_reg_rules = 6,
+	.n_reg_rules = 3,
 	.alpha2 =  "00",
 	.reg_rules = {
 		REG_RULE_2412_2462,
-		REG_RULE_2467_2472,
-		REG_RULE_2484,
 		REG_RULE_5180_5320,
-		REG_RULE_5500_5720,
-		REG_RULE_5745_5925,
+		REG_RULE_5500_5700,
 	}
 };
 

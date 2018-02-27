@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -315,7 +315,7 @@ void htc_process_credit_rpt(HTC_TARGET *target,
 			    HTC_CREDIT_REPORT *pRpt,
 			    int NumEntries, HTC_ENDPOINT_ID FromEndpoint);
 void htc_fw_event_handler(void *context, QDF_STATUS status);
-void htc_send_complete_check_cleanup(void *context);
+void htc_send_complete_check_cleanup(unsigned long context);
 #ifdef FEATURE_RUNTIME_PM
 void htc_kick_queues(void *context);
 #endif

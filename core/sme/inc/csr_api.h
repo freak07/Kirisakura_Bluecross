@@ -544,6 +544,7 @@ typedef enum {
 	eCSR_ROAM_START,
 	eCSR_ROAM_ABORT,
 	eCSR_ROAM_NAPI_OFF,
+	eCSR_ROAM_SAE_COMPUTE,
 } eRoamCmdStatus;
 
 /* comment inside indicates what roaming callback gets */
@@ -1562,6 +1563,9 @@ typedef struct tagCsrRoamInfo {
 	int rssi;
 	int tx_rate;
 	int rx_rate;
+#ifdef WLAN_FEATURE_SAE
+	struct sir_sae_info *sae_info;
+#endif
 } tCsrRoamInfo;
 
 typedef struct tagCsrFreqScanInfo {

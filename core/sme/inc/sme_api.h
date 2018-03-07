@@ -2259,5 +2259,16 @@ sme_get_roam_scan_stats(tHalHandle hal, roam_scan_stats_cb cb, void *context,
 bool sme_validate_channel_list(tHalHandle hal,
 				      uint8_t *chan_list,
 				      uint8_t num_channels);
+/**
+ * sme_send_mgmt_tx() - Sends mgmt frame from CSR to LIM
+ * @hal: The handle returned by mac_open
+ * @session_id: session id
+ * @buf: pointer to frame
+ * @len: frame length
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS sme_send_mgmt_tx(tHalHandle hal, uint8_t session_id,
+			   const uint8_t *buf, uint32_t len);
 
 #endif /* #if !defined( __SME_API_H ) */

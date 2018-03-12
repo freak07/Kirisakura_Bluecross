@@ -8372,4 +8372,20 @@ struct sir_limit_off_chan {
 	uint32_t rest_time;
 	bool skip_dfs_chans;
 };
+
+typedef void (*roam_scan_stats_cb)(void *context,
+				   struct wmi_roam_scan_stats_res *res);
+
+/**
+ * struct sir_roam_scan_stats - Stores roam scan context
+ * @vdev_id: vdev id
+ * @cb: callback to be invoked for roam scan stats response
+ * @context: context of callback
+ */
+struct sir_roam_scan_stats {
+	uint32_t vdev_id;
+	roam_scan_stats_cb cb;
+	void *context;
+};
+
 #endif /* __SIR_API_H */

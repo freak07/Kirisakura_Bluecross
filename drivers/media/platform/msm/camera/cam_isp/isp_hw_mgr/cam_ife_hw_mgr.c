@@ -1689,7 +1689,7 @@ static int cam_ife_mgr_acquire_dev(void *hw_mgr_priv, void *acquire_hw_args)
 		in_port = memdup_user(
 			u64_to_user_ptr(isp_resource[i].res_hdl),
 			isp_resource[i].length);
-		if (in_port > 0) {
+		if (!IS_ERR(in_port)) {
 			rc = cam_ife_mgr_acquire_hw_for_ctx(ife_ctx, in_port,
 				&num_pix_port_per_in, &num_rdi_port_per_in);
 			total_pix_port += num_pix_port_per_in;

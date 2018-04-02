@@ -12,9 +12,6 @@ static u32 tcp_sociopath_ssthresh(struct sock *sk) {
   u32 cwnd = tcp_sk(sk)->snd_cwnd;
   return max(cwnd-(cwnd/lambda), 2U);
 }
-static u32 tcp_sociopath_min_cwnd(const struct sock *sk) {
-  return tcp_sk(sk)->snd_ssthresh+1;
-}
 
 static void tcp_sociopath_cong_avoid(struct sock *sk, u32 ack, u32 in_flight) {
   struct tcp_sock *tp = tcp_sk(sk);

@@ -922,9 +922,8 @@ static void __hdd_ipa_wdi_meter_notifier_cb(enum ipa_wdi_meter_evt_type evt,
 		 */
 		wdi_sap_stats = data;
 
-		if (!adapter) {
-			HDD_IPA_LOG(QDF_TRACE_LEVEL_ERROR,
-				"IPA uC share stats failed - no adapter");
+		if (hdd_validate_adapter(adapter)) {
+				hdd_err("IPA uC share stats failed - invalid adapter");
 			wdi_sap_stats->stats_valid = 0;
 			return;
 		}
@@ -978,9 +977,9 @@ static void __hdd_ipa_wdi_meter_notifier_cb(enum ipa_wdi_meter_evt_type evt,
 		 */
 		ipa_set_quota = data;
 
-		if (!adapter) {
+		if (hdd_validate_adapter(adapter)) {
 			HDD_IPA_LOG(QDF_TRACE_LEVEL_ERROR,
-				"IPA uC set quota failed - no adapter");
+				    "IPA uC set quota failed - invalid adapter");
 			ipa_set_quota->set_valid = 0;
 			return;
 		}
@@ -2068,7 +2067,8 @@ static int hdd_ipa_wdi_reg_intf(struct hdd_ipa_priv *hdd_ipa,
 	ret = hdd_ipa_register_interface(hdd_ipa, iface_context);
 	if (ret) {
 		HDD_IPA_LOG(QDF_TRACE_LEVEL_ERROR,
-				"ipa register interface failed ret=%d", ret);
+			    "IPA WDI reg intf failed ret=%d", ret);
+		ret = -EFAULT;
 		return ret;
 	}
 
@@ -3346,7 +3346,7 @@ void hdd_ipa_uc_sharing_stats_request(hdd_adapter_t *adapter,
 	hdd_context_t *pHddCtx;
 	struct hdd_ipa_priv *hdd_ipa;
 
-	if (!adapter)
+	if (hdd_validate_adapter(adapter))
 		return;
 
 	pHddCtx = adapter->pHddCtx;
@@ -3382,7 +3382,7 @@ void hdd_ipa_uc_set_quota(hdd_adapter_t *adapter, uint8_t set_quota,
 	hdd_context_t *pHddCtx;
 	struct hdd_ipa_priv *hdd_ipa;
 
-	if (!adapter)
+	if (hdd_validate_adapter(adapter))
 		return;
 
 	pHddCtx = adapter->pHddCtx;
@@ -4230,13 +4230,14 @@ static void hdd_ipa_uc_op_cb(struct op_msg_type *op_msg, void *usr_ctxt)
 	struct ol_txrx_pdev_t *pdev = cds_get_context(QDF_MODULE_ID_TXRX);
 	QDF_STATUS status = QDF_STATUS_SUCCESS;
 
-	if (!pdev) {
-		HDD_IPA_LOG(QDF_TRACE_LEVEL_FATAL, "pdev is NULL");
+	if (!op_msg) {
+		HDD_IPA_LOG(QDF_TRACE_LEVEL_ERROR, "INVALID ARG");
 		return;
 	}
 
-	if (!op_msg || !usr_ctxt) {
-		HDD_IPA_LOG(QDF_TRACE_LEVEL_ERROR, "INVALID ARG");
+	if (!pdev) {
+		HDD_IPA_LOG(QDF_TRACE_LEVEL_FATAL, "pdev is NULL");
+		qdf_mem_free(op_msg);
 		return;
 	}
 
@@ -4367,7 +4368,7 @@ static void hdd_ipa_uc_offload_enable_disable(hdd_adapter_t *adapter,
 	struct hdd_ipa_iface_context *iface_context = NULL;
 	uint8_t session_id;
 
-	if (!adapter || !hdd_ipa)
+	if (hdd_validate_adapter(adapter) || !hdd_ipa)
 		return;
 
 	iface_context = adapter->ipa_context;
@@ -5319,7 +5320,7 @@ static void hdd_ipa_send_skb_to_network(qdf_nbuf_t skb,
 	unsigned int cpu_index;
 	uint32_t enabled;
 
-	if (!adapter || adapter->magic != WLAN_HDD_ADAPTER_MAGIC) {
+	if (hdd_validate_adapter(adapter)) {
 		HDD_IPA_LOG(QDF_TRACE_LEVEL_DEBUG, "Invalid adapter: 0x%pK",
 			    adapter);
 		hdd_ipa->ipa_rx_internal_drop_count++;
@@ -5544,9 +5545,9 @@ static void __hdd_ipa_w2i_cb(void *priv, enum ipa_dp_evt_type evt,
 
 		iface_context = &hdd_ipa->iface_context[iface_id];
 		adapter = iface_context->adapter;
-		if (!adapter) {
+		if (hdd_validate_adapter(adapter)) {
 			HDD_IPA_LOG(QDF_TRACE_LEVEL_ERROR,
-				    "IPA_RECEIVE: Adapter is NULL");
+				    "IPA_RECEIVE: Invalid adapter");
 			hdd_ipa->ipa_rx_internal_drop_count++;
 			kfree_skb(skb);
 			return;
@@ -5673,7 +5674,7 @@ static void hdd_ipa_send_pkt_to_tl(
 
 	qdf_spin_lock_bh(&iface_context->interface_lock);
 	adapter = iface_context->adapter;
-	if (!adapter) {
+	if (hdd_validate_adapter(adapter)) {
 		HDD_IPA_LOG(QDF_TRACE_LEVEL_WARN, "Interface Down");
 		ipa_free_skb(ipa_tx_desc);
 		iface_context->stats.num_tx_drop++;

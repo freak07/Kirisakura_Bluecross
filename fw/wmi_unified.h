@@ -8483,6 +8483,18 @@ typedef enum {
      */
     WMI_VDEV_PARAM_AMSDU_AGGREGATION_SIZE_OPTIMIZATION,    /* 0x83 */
 
+    /**
+     * In RAW mode, FW will not know whether the encryption is enabled
+     * on this vdev or not.
+     * Because of this, FW will not program the right info into the
+     * RawNwifi TLV resulting in the connection failure in RAW mode.
+     * So to program the right info, FW should know whether the security
+     * is enabled on this VDEV.
+     * Host will send this VDEV param command (With Value = 1) in case of
+     * RAW secure mode.
+     */
+    WMI_VDEV_PARAM_RAW_IS_ENCRYPTED,                       /* 0x84 */
+
 
     /*=== ADD NEW VDEV PARAM TYPES ABOVE THIS LINE ===
      * The below vdev param types are used for prototyping, and are
@@ -19162,6 +19174,11 @@ typedef struct {
     A_UINT32 queue_ptr_hi; /* upper 32 bits of queue desc adddress */
     A_UINT32 queue_no; /* 16-bit number assigned by host for queue,
                           stored in bits 15:0 of queue_no field */
+    A_UINT32 ba_window_size_valid; /* Is ba_window_size valid?
+                                    * 0 = Invalid, 1 = Valid */
+    A_UINT32 ba_window_size; /* Valid values: 0 to 256
+                              * Host sends the message when BA session is
+                              * established or terminated for the TID. */
 } wmi_peer_reorder_queue_setup_cmd_fixed_param;
 
 /**

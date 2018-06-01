@@ -283,33 +283,12 @@ static void htt_t2h_lp_msg_handler(void *context, qdf_nbuf_t htt_t2h_msg,
 	}
 	case HTT_T2H_MSG_TYPE_RX_ADDBA:
 	{
-		uint16_t peer_id;
-		uint8_t tid;
-		uint8_t win_sz;
-		uint16_t start_seq_num;
-
-		/*
-		 * FOR NOW, the host doesn't need to know the initial
-		 * sequence number for rx aggregation.
-		 * Thus, any value will do - specify 0.
-		 */
-		start_seq_num = 0;
-		peer_id = HTT_RX_ADDBA_PEER_ID_GET(*msg_word);
-		tid = HTT_RX_ADDBA_TID_GET(*msg_word);
-		win_sz = HTT_RX_ADDBA_WIN_SIZE_GET(*msg_word);
-		ol_rx_addba_handler(pdev->txrx_pdev, peer_id, tid,
-				    win_sz, start_seq_num,
-				    0 /* success */);
+		qdf_print("HTT_T2H_MSG_TYPE_RX_ADDBA not supported ");
 		break;
 	}
 	case HTT_T2H_MSG_TYPE_RX_DELBA:
 	{
-		uint16_t peer_id;
-		uint8_t tid;
-
-		peer_id = HTT_RX_DELBA_PEER_ID_GET(*msg_word);
-		tid = HTT_RX_DELBA_TID_GET(*msg_word);
-		ol_rx_delba_handler(pdev->txrx_pdev, peer_id, tid);
+		qdf_print("HTT_T2H_MSG_TYPE_RX_DELBA not supported ");
 		break;
 	}
 	case HTT_T2H_MSG_TYPE_PEER_MAP:
@@ -415,11 +394,10 @@ static void htt_t2h_lp_msg_handler(void *context, qdf_nbuf_t htt_t2h_msg,
 	}
 	case HTT_T2H_MSG_TYPE_STATS_CONF:
 	{
-		uint64_t cookie;
+		uint8_t cookie;
 		uint8_t *stats_info_list;
 
 		cookie = *(msg_word + 1);
-		cookie |= ((uint64_t) (*(msg_word + 2))) << 32;
 
 		stats_info_list = (uint8_t *) (msg_word + 3);
 		htc_pm_runtime_put(pdev->htc_pdev);

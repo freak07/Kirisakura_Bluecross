@@ -412,12 +412,6 @@ struct statsContext {
 	unsigned int magic;
 };
 
-struct linkspeedContext {
-	struct completion completion;
-	hdd_adapter_t *pAdapter;
-	unsigned int magic;
-};
-
 extern spinlock_t hdd_context_lock;
 extern struct mutex hdd_init_deinit_lock;
 
@@ -425,9 +419,7 @@ extern struct mutex hdd_init_deinit_lock;
 #define PEER_INFO_CONTEXT_MAGIC 0x50494E46  /* PEER_INFO(PINF) */
 #define POWER_CONTEXT_MAGIC 0x504F5752  /* POWR */
 #define SNR_CONTEXT_MAGIC   0x534E5200  /* SNR */
-#define LINK_CONTEXT_MAGIC  0x4C494E4B  /* LINKSPEED */
 #define LINK_STATUS_MAGIC   0x4C4B5354  /* LINKSTATUS(LNST) */
-#define TEMP_CONTEXT_MAGIC  0x74656d70   /* TEMP (temperature) */
 #define APF_CONTEXT_MAGIC 0x4575354    /* APF */
 #define POWER_STATS_MAGIC 0x14111990
 #define ACTION_FRAME_RANDOM_CONTEXT_MAGIC 0x87878787
@@ -804,9 +796,10 @@ typedef struct hdd_roc_req {
  * @adapter: Adapter address
  * @scan_request: scan request holder
  * @scan_id: scan identifier used across host layers which is generated at WMI
- * @cookie: scan request identifier sent to userspace
  * @source: scan request originator (NL/Vendor scan)
  * @timestamp: scan request timestamp
+ * @inactivity_timer: scan inactivity timer
+ * @scan_req_flags: scan request flags
  *
  * Scan request linked list element
  */
@@ -1374,8 +1367,6 @@ struct hdd_adapter_s {
 
 	/* TODO Move this to sta Ctx */
 	struct wireless_dev wdev;
-	struct cfg80211_scan_request *request;
-	struct cfg80211_scan_request *vendor_request;
 
 	/** ops checks if Opportunistic Power Save is Enable or Not
 	 * ctw stores ctWindow value once we receive Opps command from
@@ -1395,8 +1386,9 @@ struct hdd_adapter_s {
 	struct net_device_stats stats;
 	/** HDD statistics*/
 	hdd_stats_t hdd_stats;
-	/** linkspeed statistics */
-	tSirLinkSpeedInfo ls_stats;
+
+	/* estimated link speed */
+	u32 estimated_linkspeed;
 	/* SAP peer station info */
 	struct sir_peer_sta_info peer_sta_info;
 
@@ -1531,6 +1523,8 @@ struct hdd_adapter_s {
 	struct delayed_work acs_pending_work;
 
 	struct work_struct scan_block_work;
+	qdf_list_t blocked_scan_request_q;
+	qdf_mutex_t blocked_scan_request_q_lock;
 #ifdef MSM_PLATFORM
 	unsigned long prev_rx_packets;
 	unsigned long prev_tx_packets;
@@ -1565,14 +1559,8 @@ struct hdd_adapter_s {
 	/* Time stamp for start RoC request */
 	uint64_t start_roc_ts;
 
-	/* State for synchronous OCB requests to WMI */
-	struct sir_ocb_set_config_response ocb_set_config_resp;
-	struct sir_ocb_get_tsf_timer_response ocb_get_tsf_timer_resp;
-	struct sir_dcc_get_stats_response *dcc_get_stats_resp;
-	struct sir_dcc_update_ndl_response dcc_update_ndl_resp;
-
-	/* MAC addresses used for OCB interfaces */
 #ifdef WLAN_FEATURE_DSRC
+	/* MAC addresses used for OCB interfaces */
 	struct qdf_mac_addr ocb_mac_address[QDF_MAX_CONCURRENCY_PERSONA];
 	int ocb_mac_addr_count;
 #endif

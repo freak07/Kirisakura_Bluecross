@@ -212,6 +212,7 @@ struct ol_tx_desc_t {
 #endif
 	void *tso_desc;
 	void *tso_num_desc;
+	bool notify_tx_comp;
 };
 
 typedef TAILQ_HEAD(some_struct_name, ol_tx_desc_t) ol_tx_desc_list;
@@ -555,6 +556,15 @@ struct ol_txrx_stats_req_internal {
     int offset;
 };
 
+struct ol_txrx_fw_stats_desc_t {
+	struct ol_txrx_stats_req_internal *req;
+	unsigned char desc_id;
+};
+
+struct ol_txrx_fw_stats_desc_elem_t {
+	struct ol_txrx_fw_stats_desc_elem_t *next;
+	struct ol_txrx_fw_stats_desc_t desc;
+};
 
 /*
  * As depicted in the diagram below, the pdev contains an array of
@@ -666,6 +676,14 @@ struct ol_txrx_pdev_t {
 	 */
 	qdf_atomic_t target_tx_credit;
 	qdf_atomic_t orig_target_tx_credit;
+
+	struct {
+		uint16_t pool_size;
+		struct ol_txrx_fw_stats_desc_elem_t *pool;
+		struct ol_txrx_fw_stats_desc_elem_t *freelist;
+		qdf_spinlock_t pool_lock;
+		qdf_atomic_t initialized;
+	} ol_txrx_fw_stats_desc_pool;
 
 	/* Peer mac address to staid mapping */
 	struct ol_mac_addr mac_to_staid[WLAN_MAX_STA_COUNT + 3];
@@ -1066,6 +1084,9 @@ struct ol_txrx_vdev_t {
 						*/
 	ol_txrx_rx_fp rx; /* receive function used by this vdev */
 	ol_txrx_stats_rx_fp stats_rx; /* receive function used by this vdev */
+
+	/* completion function used by this vdev*/
+	ol_txrx_completion_fp tx_comp;
 
 	struct {
 		/*

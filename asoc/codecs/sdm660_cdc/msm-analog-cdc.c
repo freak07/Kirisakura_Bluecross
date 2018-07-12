@@ -859,7 +859,7 @@ exit:
 	msm_anlg_cdc_compute_impedance(codec, impedance_l, impedance_r,
 				      zl, zr, high);
 
-	dev_dbg(codec->dev, "%s: RL %d ohm, RR %d ohm\n", __func__, *zl, *zr);
+	dev_info(codec->dev, "%s: RL %d ohm, RR %d ohm\n", __func__, *zl, *zr);
 	dev_dbg(codec->dev, "%s: Impedance detection completed\n", __func__);
 }
 

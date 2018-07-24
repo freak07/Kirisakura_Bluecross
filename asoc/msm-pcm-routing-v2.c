@@ -17385,10 +17385,27 @@ static struct snd_soc_platform_driver msm_soc_routing_platform = {
 
 static int msm_routing_pcm_probe(struct platform_device *pdev)
 {
+	struct msm_pcm_drv_data *pdata = NULL;
+	int rc = 0;
+
+	pdata = devm_kzalloc(&pdev->dev, sizeof(*pdata), GFP_KERNEL);
+	if (!pdata) {
+		rc = -ENOMEM;
+		goto out;
+	}
+
+	of_property_read_string(pdev->dev.of_node, "qcom,msm-pcm-config",
+				&pdata->config_name);
+
+	platform_set_drvdata(pdev, pdata);
 
 	dev_dbg(&pdev->dev, "dev name %s\n", dev_name(&pdev->dev));
-	return snd_soc_register_platform(&pdev->dev,
-				  &msm_soc_routing_platform);
+
+	rc = snd_soc_register_platform(&pdev->dev,
+				&msm_soc_routing_platform);
+
+out:
+	return rc;
 }
 
 static int msm_routing_pcm_remove(struct platform_device *pdev)

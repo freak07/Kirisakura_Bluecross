@@ -1617,6 +1617,8 @@ static int __wlan_hdd_cfg80211_do_acs(struct wiphy *wiphy,
 
 	hdd_info("enter(%s)", netdev_name(adapter->dev));
 
+	hdd_info("current country is %s", hdd_ctx->reg.alpha2);
+
 	if (QDF_GLOBAL_FTM_MODE == hdd_get_conparam()) {
 		hdd_err("Command not allowed in FTM mode");
 		return -EPERM;

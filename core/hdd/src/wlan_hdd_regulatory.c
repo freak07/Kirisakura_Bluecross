@@ -324,6 +324,53 @@ static int is_wiphy_custom_regulatory(struct wiphy *wiphy)
 }
 #endif
 
+static bool reg_does_bw_fit(const struct ieee80211_freq_range *freq_range,
+			    u32 center_freq_khz, u32 bw_khz)
+{
+	u32 start_freq_khz, end_freq_khz;
+
+	start_freq_khz = center_freq_khz - (bw_khz / 2);
+	end_freq_khz = center_freq_khz + (bw_khz / 2);
+
+	if (start_freq_khz >= freq_range->start_freq_khz &&
+	    end_freq_khz <= freq_range->end_freq_khz)
+		return true;
+
+	return false;
+}
+
+
+static u32 reg_rule_to_chan_bw_flags(const struct ieee80211_reg_rule *reg_rule,
+				     const struct ieee80211_channel *chan)
+{
+	const struct ieee80211_freq_range *freq_range;
+	u32 max_bandwidth_khz, bw_flags = 0;
+
+	freq_range = &reg_rule->freq_range;
+
+	max_bandwidth_khz = freq_range->max_bandwidth_khz;
+
+	/* If we get a reg_rule we can assume that at least 5Mhz fit */
+	if (!reg_does_bw_fit(freq_range, MHZ_TO_KHZ(chan->center_freq),
+			     MHZ_TO_KHZ(10)))
+		bw_flags |= IEEE80211_CHAN_NO_10MHZ;
+	if (!reg_does_bw_fit(freq_range, MHZ_TO_KHZ(chan->center_freq),
+			     MHZ_TO_KHZ(20)))
+		bw_flags |= IEEE80211_CHAN_NO_20MHZ;
+
+	if (max_bandwidth_khz < MHZ_TO_KHZ(10))
+		bw_flags |= IEEE80211_CHAN_NO_10MHZ;
+	if (max_bandwidth_khz < MHZ_TO_KHZ(20))
+		bw_flags |= IEEE80211_CHAN_NO_20MHZ;
+	if (max_bandwidth_khz < MHZ_TO_KHZ(40))
+		bw_flags |= IEEE80211_CHAN_NO_HT40;
+	if (max_bandwidth_khz < MHZ_TO_KHZ(80))
+		bw_flags |= IEEE80211_CHAN_NO_80MHZ;
+	if (max_bandwidth_khz < MHZ_TO_KHZ(160))
+		bw_flags |= IEEE80211_CHAN_NO_160MHZ;
+	return bw_flags;
+}
+
 
 /**
  * hdd_modify_wiphy() - modify wiphy
@@ -336,6 +383,7 @@ static void hdd_modify_wiphy(struct wiphy  *wiphy,
 			     struct ieee80211_channel *chan)
 {
 	const struct ieee80211_reg_rule *reg_rule;
+	u32 bw_flags;
 
 	if (is_wiphy_custom_regulatory(wiphy)) {
 		reg_rule = freq_reg_info(wiphy, MHZ_TO_KHZ(chan->center_freq));
@@ -362,6 +410,44 @@ static void hdd_modify_wiphy(struct wiphy  *wiphy,
 
 			chan->max_power =
 				MBM_TO_DBM(reg_rule->power_rule.max_eirp);
+
+			bw_flags = reg_rule_to_chan_bw_flags(reg_rule, chan);
+
+			if (!(bw_flags & IEEE80211_CHAN_NO_10MHZ) &&
+			    (chan->flags & IEEE80211_CHAN_NO_10MHZ)) {
+				hdd_info("remove %u mhz restriction for %u",
+					 10, chan->center_freq);
+				chan->flags &= ~IEEE80211_CHAN_NO_10MHZ;
+			}
+
+			if (!(bw_flags & IEEE80211_CHAN_NO_20MHZ) &&
+			    (chan->flags & IEEE80211_CHAN_NO_20MHZ)) {
+				hdd_info("remove %u mhz restriction for %u",
+					 20, chan->center_freq);
+				chan->flags &= ~IEEE80211_CHAN_NO_20MHZ;
+			}
+
+			if (!(bw_flags & IEEE80211_CHAN_NO_HT40) &&
+			    ((chan->flags & IEEE80211_CHAN_NO_HT40) ==
+			     IEEE80211_CHAN_NO_HT40)) {
+				hdd_info("remove %u mhz restriction for %u",
+					 40, chan->center_freq);
+				chan->flags &= ~IEEE80211_CHAN_NO_HT40;
+			}
+
+			if (!(bw_flags & IEEE80211_CHAN_NO_80MHZ) &&
+			    (chan->flags & IEEE80211_CHAN_NO_80MHZ)) {
+				hdd_info("remove %u mhz restriction for %u",
+					 80, chan->center_freq);
+				chan->flags &= ~IEEE80211_CHAN_NO_80MHZ;
+			}
+
+			if (!(bw_flags & IEEE80211_CHAN_NO_160MHZ) &&
+			    (chan->flags & IEEE80211_CHAN_NO_160MHZ)) {
+				hdd_info("remove %u mhz restriction for %u",
+					 160, chan->center_freq);
+				chan->flags &= ~IEEE80211_CHAN_NO_160MHZ;
+			}
 		}
 	}
 }

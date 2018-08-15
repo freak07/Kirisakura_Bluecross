@@ -541,6 +541,7 @@ struct wcd_mbhc {
 	bool skip_imped_detection;
 	bool is_btn_already_regd;
 	bool extn_cable_hph_rem;
+	bool swap_detect;
 
 	struct snd_soc_codec *codec;
 	/* Work to perform MBHC Firmware Read */

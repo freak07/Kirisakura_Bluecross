@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2019 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -555,15 +555,14 @@ sch_bcn_process_sta_ibss(tpAniSirGlobal mac_ctx,
 		if ((operMode == eHT_CHANNEL_WIDTH_80MHZ) &&
 		    (bcn->OperatingMode.chanWidth > eHT_CHANNEL_WIDTH_80MHZ))
 			skip_opmode_update = true;
+
 		if (WNI_CFG_CHANNEL_BONDING_MODE_DISABLE == cb_mode) {
 			/*
-			 * if channel bonding is disabled from INI and
-			 * receiving beacon which has operating mode IE
-			 * containing channel width change then don't update
-			 * CH_WIDTH
+			 * if channel bonding is disabled from INI don't
+			 * update the CH_WIDTH
 			 */
-			pe_err("CB disabled & CH_WIDTH changed old[%d] new[%d]",
-				operMode, bcn->OperatingMode.chanWidth);
+			pe_debug_rate_limited(30, "CB disabled skip bw update: old[%d] new[%d]",
+				      operMode, bcn->OperatingMode.chanWidth);
 			return;
 		}
 
@@ -629,15 +628,14 @@ sch_bcn_process_sta_ibss(tpAniSirGlobal mac_ctx,
 
 	if (WNI_CFG_CHANNEL_BONDING_MODE_DISABLE == cb_mode) {
 		/*
-		 * if channel bonding is disabled from INI and
-		 * receiving beacon which has operating mode IE
-		 * containing channel width change then don't update
-		 * the CH_WIDTH
+		 * if channel bonding is disabled from INI don't
+		 * update the CH_WIDTH
 		 */
-		pe_err("CB disabled & VHT CH_WIDTH changed old[%d] new[%d]",
-			operMode, bcn->VHTOperation.chanWidth);
+		pe_debug_rate_limited(30, "CB disabled, skip ch width update: old[%d] new[%d]",
+				      operMode, bcn->VHTOperation.chanWidth);
 		return;
 	}
+
 	if (!skip_opmode_update &&
 	    (operMode != bcn->VHTOperation.chanWidth)) {
 		pe_debug("received VHTOP CHWidth %d staIdx = %d",

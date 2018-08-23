@@ -700,6 +700,15 @@ static int rt5514_i2s_use_asrc(struct snd_soc_dapm_widget *source,
 	return (rt5514->sysclk > rt5514->lrck * 384);
 }
 
+static int rt5514_dmic_event(struct snd_soc_dapm_widget *w,
+				 struct snd_kcontrol *k, int event)
+{
+	if (event & SND_SOC_DAPM_POST_PMU)
+		usleep_range(30000, 30100);
+
+	return 0;
+}
+
 static const struct snd_soc_dapm_widget rt5514_dapm_widgets[] = {
 	/* Input Lines */
 	SND_SOC_DAPM_INPUT("DMIC1L"),
@@ -710,8 +719,10 @@ static const struct snd_soc_dapm_widget rt5514_dapm_widgets[] = {
 	SND_SOC_DAPM_INPUT("AMICL"),
 	SND_SOC_DAPM_INPUT("AMICR"),
 
-	SND_SOC_DAPM_PGA("DMIC1", SND_SOC_NOPM, 0, 0, NULL, 0),
-	SND_SOC_DAPM_PGA("DMIC2", SND_SOC_NOPM, 0, 0, NULL, 0),
+	SND_SOC_DAPM_PGA_E("DMIC1", SND_SOC_NOPM, 0, 0, NULL, 0,
+		rt5514_dmic_event, SND_SOC_DAPM_POST_PMU),
+	SND_SOC_DAPM_PGA_E("DMIC2", SND_SOC_NOPM, 0, 0, NULL, 0,
+		rt5514_dmic_event, SND_SOC_DAPM_POST_PMU),
 
 	SND_SOC_DAPM_SUPPLY("DMIC CLK", SND_SOC_NOPM, 0, 0,
 		rt5514_set_dmic_clk, SND_SOC_DAPM_PRE_PMU),

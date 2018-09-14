@@ -677,8 +677,8 @@ static int rt5514_i2s_use_asrc(struct snd_soc_dapm_widget *source,
 static int rt5514_dmic_event(struct snd_soc_dapm_widget *w,
 				 struct snd_kcontrol *k, int event)
 {
-	if (event & SND_SOC_DAPM_POST_PMU)
-		usleep_range(30000, 30100);
+	if (event & SND_SOC_DAPM_PRE_PMU)
+		usleep_range(80000, 80100);
 
 	return 0;
 }
@@ -693,10 +693,8 @@ static const struct snd_soc_dapm_widget rt5514_dapm_widgets[] = {
 	SND_SOC_DAPM_INPUT("AMICL"),
 	SND_SOC_DAPM_INPUT("AMICR"),
 
-	SND_SOC_DAPM_PGA_E("DMIC1", SND_SOC_NOPM, 0, 0, NULL, 0,
-		rt5514_dmic_event, SND_SOC_DAPM_POST_PMU),
-	SND_SOC_DAPM_PGA_E("DMIC2", SND_SOC_NOPM, 0, 0, NULL, 0,
-		rt5514_dmic_event, SND_SOC_DAPM_POST_PMU),
+	SND_SOC_DAPM_PGA("DMIC1", SND_SOC_NOPM, 0, 0, NULL, 0),
+	SND_SOC_DAPM_PGA("DMIC2", SND_SOC_NOPM, 0, 0, NULL, 0),
 
 	SND_SOC_DAPM_SUPPLY("DMIC CLK", SND_SOC_NOPM, 0, 0,
 		rt5514_set_dmic_clk, SND_SOC_DAPM_PRE_PMU),
@@ -795,7 +793,8 @@ static const struct snd_soc_dapm_widget rt5514_dapm_widgets[] = {
 	SND_SOC_DAPM_PGA("Stereo2 ADC MIX", SND_SOC_NOPM, 0, 0, NULL, 0),
 
 	/* Audio Interface */
-	SND_SOC_DAPM_AIF_OUT("AIF1TX", "AIF1 Capture", 0, SND_SOC_NOPM, 0, 0),
+	SND_SOC_DAPM_AIF_OUT_E("AIF1TX", "AIF1 Capture", 0, SND_SOC_NOPM, 0, 0,
+		rt5514_dmic_event, SND_SOC_DAPM_PRE_PMU),
 };
 
 static const struct snd_soc_dapm_route rt5514_dapm_routes[] = {

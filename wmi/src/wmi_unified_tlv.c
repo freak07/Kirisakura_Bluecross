@@ -13791,6 +13791,14 @@ static bool is_management_record_tlv(uint32_t cmd_id)
 
 	return false;
 }
+
+static bool is_diag_event_tlv(uint32_t event_id)
+{
+	if (WMI_DIAG_EVENTID == event_id)
+		return true;
+
+	return false;
+}
 #endif
 
 static uint16_t wmi_tag_vdev_set_cmd(wmi_unified_t wmi_hdl, wmi_buf_t buf)
@@ -15864,6 +15872,8 @@ void wmi_tlv_attach(wmi_unified_t wmi_handle)
 	wmi_handle->log_info.buf_offset_event = 4;
 	wmi_handle->log_info.is_management_record =
 		is_management_record_tlv;
+	wmi_handle->log_info.is_diag_event =
+		is_diag_event_tlv;
 #endif
 	populate_tlv_service(wmi_handle->services);
 	populate_tlv_events_id(wmi_handle->wmi_events);
@@ -15879,6 +15889,8 @@ void wmi_tlv_attach(wmi_unified_t wmi_handle)
 	wmi_handle->log_info.buf_offset_event = 4;
 	wmi_handle->log_info.is_management_record =
 		is_management_record_tlv;
+	wmi_handle->log_info.is_diag_event =
+		is_diag_event_tlv;
 #endif
 }
 #endif

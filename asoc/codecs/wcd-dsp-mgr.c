@@ -802,6 +802,7 @@ static int wdsp_ssr_handler(struct wdsp_mgr_priv *wdsp, void *arg,
 		__wdsp_clr_ready_locked(wdsp, WDSP_SSR_STATUS_WDSP_READY);
 		wdsp_broadcast_event_downseq(wdsp, WDSP_EVENT_PRE_SHUTDOWN,
 					     NULL);
+		reinit_completion(&wdsp->ready_compl);
 		schedule_work(&wdsp->ssr_work);
 		break;
 
@@ -818,7 +819,7 @@ static int wdsp_ssr_handler(struct wdsp_mgr_priv *wdsp, void *arg,
 						     WDSP_EVENT_PRE_SHUTDOWN,
 						     NULL);
 		}
-
+		reinit_completion(&wdsp->ready_compl);
 		schedule_work(&wdsp->ssr_work);
 		break;
 
@@ -1313,6 +1314,7 @@ static struct platform_driver wdsp_mgr_driver = {
 		.name = "wcd-dsp-mgr",
 		.owner = THIS_MODULE,
 		.of_match_table = of_match_ptr(wdsp_mgr_dt_match),
+		.suppress_bind_attrs = true,
 	},
 	.probe = wdsp_mgr_probe,
 	.remove = wdsp_mgr_remove,

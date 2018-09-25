@@ -411,10 +411,10 @@ static int wdsp_glink_close_ch(struct wdsp_glink_ch *ch)
 			dev_err(wpriv->dev, "%s: glink_close is failed, ret = %d\n",
 				 __func__, ret);
 		} else {
-			ch->handle = NULL;
 			dev_dbg(wpriv->dev, "%s: ch %s is closed\n", __func__,
 				ch->ch_cfg.name);
 		}
+		ch->handle = NULL;
 	} else {
 		dev_dbg(wpriv->dev, "%s: ch %s is already closed\n", __func__,
 			ch->ch_cfg.name);
@@ -1218,6 +1218,7 @@ static struct platform_driver wdsp_glink_driver = {
 		.name   = WDSP_GLINK_DRIVER_NAME,
 		.owner  = THIS_MODULE,
 		.of_match_table = wdsp_glink_of_match,
+		.suppress_bind_attrs = true,
 	},
 };
 

@@ -36,6 +36,8 @@
 
 #define MAXIMUM_LINKS_PER_SESSION  4
 
+#define MAXIMUM_LINKS_PER_SESSION  4
+
 /**
  * enum crm_workq_task_type
  * @codes: to identify which type of task is present

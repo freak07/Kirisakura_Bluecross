@@ -11,3 +11,5 @@ ifeq ($(CONFIG_ARCH_SDM845), y)
 obj-$(CONFIG_MSM_AVTIMER) += avtimer.o
 endif
 obj-$(CONFIG_MSM_QDSP6V2_CODECS)  += codecs/
+
+obj-$(CONFIG_CIRRUS_SPKR_PROTECTION) += msm-cirrus-playback.o

@@ -45,6 +45,10 @@
 #include "msm-dolby-dap-config.h"
 #include "msm-ds2-dap-config.h"
 
+#if defined(CONFIG_CIRRUS_SPKR_PROTECTION)
+#include <dsp/msm-cirrus-playback.h>
+#endif
+
 #ifndef CONFIG_DOLBY_DAP
 #undef DOLBY_ADM_COPP_TOPOLOGY_ID
 #define DOLBY_ADM_COPP_TOPOLOGY_ID 0xFFFFFFFE
@@ -17345,6 +17349,10 @@ static int msm_routing_probe(struct snd_soc_platform *platform)
 	snd_soc_add_platform_controls(platform,
 		msm_routing_be_dai_name_table_mixer_controls,
 		ARRAY_SIZE(msm_routing_be_dai_name_table_mixer_controls));
+
+#if defined(CONFIG_CIRRUS_SPKR_PROTECTION)
+	msm_crus_pb_add_controls(platform);
+#endif
 
 	snd_soc_add_platform_controls(platform, msm_source_tracking_controls,
 				ARRAY_SIZE(msm_source_tracking_controls));

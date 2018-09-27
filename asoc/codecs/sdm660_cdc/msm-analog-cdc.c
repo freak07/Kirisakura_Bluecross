@@ -3838,6 +3838,11 @@ static int sdm660_cdc_notifier_service_cb(struct notifier_block *nb,
 		}
 		dev_dbg(codec->dev,
 			"ADSP is about to power down. teardown/reset codec\n");
+#if defined(CONFIG_CIRRUS_SPKR_PROTECTION)
+		dev_dbg(codec->dev,
+			"%s: clear the afe config of cirrus port\n", __func__);
+		afe_clear_config(AFE_CIRRUS_PORT_CONFIG);
+#endif
 		msm_anlg_cdc_device_down(codec);
 		break;
 	case AUDIO_NOTIFIER_SERVICE_UP:

@@ -2867,6 +2867,8 @@ static int msm_populate_dai_link_component_of_node(
 
 		/* populate platform_of_node for snd card dai links */
 		if (dai_link[i].platform_name &&
+				strcmp(dai_link[i].platform_name,
+					"spi32765.0") &&
 				!dai_link[i].platform_of_node) {
 			index = of_property_match_string(cdev->of_node,
 					"asoc-platform-names",

@@ -51,6 +51,9 @@ struct rt5514_dsp {
 	bool need_wake;
 	spinlock_t pm_lock;
 	bool suspend;
+	struct wakeup_source ws;
+	struct mutex count_lock;
+	int wake_count;
 };
 
 static const struct snd_pcm_hardware rt5514_spi_pcm_hardware = {
@@ -335,8 +338,6 @@ static int rt5514_spi_pcm_close(struct snd_pcm_substream *substream)
 
 	spin_lock_irqsave(&rt5514_dsp->pm_lock, pm_flags);
 	if (rt5514_dsp->need_wake == true) {
-		pr_info("%s: remove wakelock", __func__);
-		pm_relax(rt5514_dsp->dev);
 		rt5514_dsp->need_wake = false;
 	}
 	spin_unlock_irqrestore(&rt5514_dsp->pm_lock, pm_flags);
@@ -437,6 +438,10 @@ static int rt5514_spi_pcm_probe(struct snd_soc_platform *platform)
 
 	snd_soc_platform_set_drvdata(platform, rt5514_dsp);
 
+	wakeup_source_init(&rt5514_dsp->ws, "rt5514-spi");
+	mutex_init(&rt5514_dsp->count_lock);
+	rt5514_dsp->wake_count = 0;
+
 	if (rt5514_spi->irq) {
 		ret = devm_request_threaded_irq(&rt5514_spi->dev,
 			rt5514_spi->irq, NULL, rt5514_spi_irq,
@@ -488,6 +493,15 @@ int rt5514_spi_burst_read(unsigned int addr, u8 *rxbuf, size_t len)
 	unsigned int i, end, offset = 0;
 	struct spi_message message;
 	struct spi_transfer x[3];
+	struct snd_soc_platform *platform =
+		snd_soc_lookup_platform(&rt5514_spi->dev);
+	struct rt5514_dsp *rt5514_dsp =
+		snd_soc_platform_get_drvdata(platform);
+
+	mutex_lock(&rt5514_dsp->count_lock);
+	if (rt5514_dsp->wake_count++ == 0)
+		__pm_stay_awake(&rt5514_dsp->ws);
+	mutex_unlock(&rt5514_dsp->count_lock);
 
 	while (offset < len) {
 		if (offset + RT5514_SPI_BUF_LEN <= len)
@@ -518,8 +532,13 @@ int rt5514_spi_burst_read(unsigned int addr, u8 *rxbuf, size_t len)
 
 		status = spi_sync(rt5514_spi, &message);
 
-		if (status)
+		if (status) {
+			mutex_lock(&rt5514_dsp->count_lock);
+			if (--rt5514_dsp->wake_count == 0)
+				__pm_relax(&rt5514_dsp->ws);
+			mutex_unlock(&rt5514_dsp->count_lock);
 			return false;
+		}
 
 		memcpy(rxbuf + offset, read_buf, end);
 
@@ -546,6 +565,11 @@ int rt5514_spi_burst_read(unsigned int addr, u8 *rxbuf, size_t len)
 		rxbuf[i + 7] = write_buf[0];
 	}
 
+	mutex_lock(&rt5514_dsp->count_lock);
+	if (--rt5514_dsp->wake_count == 0)
+		__pm_relax(&rt5514_dsp->ws);
+	mutex_unlock(&rt5514_dsp->count_lock);
+
 	return true;
 }
 EXPORT_SYMBOL_GPL(rt5514_spi_burst_read);
@@ -564,6 +588,15 @@ int rt5514_spi_burst_write(u32 addr, const u8 *txbuf, size_t len)
 	u8 spi_cmd = RT5514_SPI_CMD_BURST_WRITE;
 	u8 write_buf[RT5514_SPI_BUF_LEN + 6];
 	unsigned int i, end, offset = 0;
+	struct snd_soc_platform *platform =
+		snd_soc_lookup_platform(&rt5514_spi->dev);
+	struct rt5514_dsp *rt5514_dsp =
+		snd_soc_platform_get_drvdata(platform);
+
+	mutex_lock(&rt5514_dsp->count_lock);
+	if (rt5514_dsp->wake_count++ == 0)
+		__pm_stay_awake(&rt5514_dsp->ws);
+	mutex_unlock(&rt5514_dsp->count_lock);
 
 	while (offset < len) {
 		if (offset + RT5514_SPI_BUF_LEN <= len)
@@ -594,6 +627,11 @@ int rt5514_spi_burst_write(u32 addr, const u8 *txbuf, size_t len)
 
 		offset += RT5514_SPI_BUF_LEN;
 	}
+
+	mutex_lock(&rt5514_dsp->count_lock);
+	if (--rt5514_dsp->wake_count == 0)
+		__pm_relax(&rt5514_dsp->ws);
+	mutex_unlock(&rt5514_dsp->count_lock);
 
 	return 0;
 }

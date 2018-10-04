@@ -275,8 +275,6 @@ struct rt5514_priv {
 	u8 *model_buf;
 	unsigned int model_len;
 	unsigned int pll3_cal_value;
-	int wake_count;
-	struct mutex pm_lock;
 };
 
 #endif /* __RT5514_H__ */

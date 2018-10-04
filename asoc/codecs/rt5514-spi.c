@@ -48,9 +48,6 @@ struct rt5514_dsp {
 	struct snd_pcm_substream *substream;
 	unsigned int buf_base, buf_limit, buf_rp, buf_rp_addr;
 	size_t buf_size, get_size, dma_offset;
-	bool need_wake;
-	spinlock_t pm_lock;
-	bool suspend;
 	struct wakeup_source ws;
 	struct mutex count_lock;
 	int wake_count;
@@ -259,12 +256,6 @@ static void rt5514_schedule_copy(struct rt5514_dsp *rt5514_dsp)
 		return;
 	}
 
-	if (rt5514_dsp->suspend) {
-		rt5514_dsp->suspend = false;
-		msleep(1000);
-		pr_info("%s: wait suspend finish then copy data", __func__);
-	}
-
 	/**
 	 * The address area x1800XXXX is the register address, and it cannot
 	 * support spi burst read perfectly. So we use the spi burst read
@@ -295,16 +286,10 @@ static void rt5514_schedule_copy(struct rt5514_dsp *rt5514_dsp)
 static irqreturn_t rt5514_spi_irq(int irq, void *data)
 {
 	struct rt5514_dsp *rt5514_dsp = data;
-	unsigned long pm_flags;
 
-	spin_lock_irqsave(&rt5514_dsp->pm_lock, pm_flags);
-	if (rt5514_dsp->need_wake == false) {
-		pr_info("%s: hold wakelock", __func__);
-		pm_wakeup_event(rt5514_dsp->dev,
-			jiffies_to_msecs(WAKEUP_TIMEOUT));
-		rt5514_dsp->need_wake = true;
-	}
-	spin_unlock_irqrestore(&rt5514_dsp->pm_lock, pm_flags);
+	pm_wakeup_event(rt5514_dsp->dev,
+		jiffies_to_msecs(WAKEUP_TIMEOUT));
+
 
 	schedule_delayed_work(&rt5514_dsp->irq_work, 5);
 
@@ -315,9 +300,15 @@ static void rt5514_spi_irq_work(struct work_struct *work)
 {
 	struct rt5514_dsp *rt5514_dsp =
 		container_of(work, struct rt5514_dsp, irq_work.work);
+	struct snd_card *card = rt5514_dsp->substream->pcm->card;
+	int err;
 
 	mutex_lock(&rt5514_dsp->dma_lock);
-	rt5514_schedule_copy(rt5514_dsp);
+	snd_power_lock(card);
+	err = snd_power_wait(card, SNDRV_CTL_POWER_D0);
+	if (err >= 0)
+		rt5514_schedule_copy(rt5514_dsp);
+	snd_power_unlock(card);
 	mutex_unlock(&rt5514_dsp->dma_lock);
 }
 
@@ -325,22 +316,6 @@ static void rt5514_spi_irq_work(struct work_struct *work)
 static int rt5514_spi_pcm_open(struct snd_pcm_substream *substream)
 {
 	snd_soc_set_runtime_hwparams(substream, &rt5514_spi_pcm_hardware);
-
-	return 0;
-}
-
-static int rt5514_spi_pcm_close(struct snd_pcm_substream *substream)
-{
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct rt5514_dsp *rt5514_dsp =
-			snd_soc_platform_get_drvdata(rtd->platform);
-	unsigned long pm_flags;
-
-	spin_lock_irqsave(&rt5514_dsp->pm_lock, pm_flags);
-	if (rt5514_dsp->need_wake == true) {
-		rt5514_dsp->need_wake = false;
-	}
-	spin_unlock_irqrestore(&rt5514_dsp->pm_lock, pm_flags);
 
 	return 0;
 }
@@ -410,7 +385,6 @@ static snd_pcm_uframes_t rt5514_spi_pcm_pointer(
 
 static const struct snd_pcm_ops rt5514_spi_pcm_ops = {
 	.open		= rt5514_spi_pcm_open,
-	.close          = rt5514_spi_pcm_close,
 	.hw_params	= rt5514_spi_hw_params,
 	.hw_free	= rt5514_spi_hw_free,
 	.pointer	= rt5514_spi_pcm_pointer,
@@ -430,11 +404,6 @@ static int rt5514_spi_pcm_probe(struct snd_soc_platform *platform)
 	mutex_init(&rt5514_dsp->dma_lock);
 	INIT_DELAYED_WORK(&rt5514_dsp->copy_work, rt5514_spi_copy_work);
 	INIT_DELAYED_WORK(&rt5514_dsp->irq_work, rt5514_spi_irq_work);
-
-	spin_lock_init(&rt5514_dsp->pm_lock);
-	rt5514_dsp->need_wake = false;
-
-	rt5514_dsp->suspend = false;
 
 	snd_soc_platform_set_drvdata(platform, rt5514_dsp);
 
@@ -701,9 +670,6 @@ static int rt5514_suspend(struct device *dev)
 	if (device_may_wakeup(dev))
 		enable_irq_wake(irq);
 
-	if (rt5514_dsp)
-		rt5514_dsp->suspend = true;
-
 	return 0;
 }
 
@@ -716,9 +682,6 @@ static int rt5514_resume(struct device *dev)
 
 	if (device_may_wakeup(dev))
 		disable_irq_wake(irq);
-
-	if (rt5514_dsp)
-		rt5514_dsp->suspend = false;
 
 	return 0;
 }

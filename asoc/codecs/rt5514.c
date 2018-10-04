@@ -60,6 +60,7 @@ static const struct reg_sequence rt5514_i2c_patch[] = {
 	{0x18001118, 0x00000000, RESET_CMD_DELAY},
 	{0x1800111c, 0x00000000, RESET_CMD_DELAY},
 	{0x18002000, 0x000010ec, RESET_CMD_DELAY},
+	{0x18001044, 0x00000000, RESET_CMD_DELAY},
 };
 
 static const struct reg_sequence rt5514_patch[] = {
@@ -339,27 +340,13 @@ static int rt5514_dsp_frame_flag_get(struct snd_kcontrol *kcontrol,
 	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct rt5514_priv *rt5514 = snd_soc_component_get_drvdata(component);
 	struct snd_soc_codec *codec = rt5514->codec;
-	unsigned int addr1, addr2;
-
-	mutex_lock(&rt5514->pm_lock);
-	rt5514->wake_count++;
-	pm_wakeup_event(codec->dev, jiffies_to_msecs(WAKEUP_TIMEOUT));
-	mutex_unlock(&rt5514->pm_lock);
+	unsigned int value;
 
 	rt5514_spi_burst_read(RT5514_BUFFER_MUSIC_WP, (u8 *)&buf, sizeof(buf));
-	addr1 = buf[0] | buf[1] << 8 | buf[2] << 16 | buf[3] << 24;
+	value = buf[0] | buf[1] << 8 | buf[2] << 16 | buf[3] << 24;
+	value &= 0xfff00000;
 
-	msleep(20);
-
-	rt5514_spi_burst_read(RT5514_BUFFER_MUSIC_WP, (u8 *)&buf, sizeof(buf));
-	addr2 = buf[0] | buf[1] << 8 | buf[2] << 16 | buf[3] << 24;
-
-	ucontrol->value.integer.value[0] = (addr1 != addr2);
-
-	mutex_lock(&rt5514->pm_lock);
-	if (--rt5514->wake_count == 0)
-		pm_relax(codec->dev);
-	mutex_unlock(&rt5514->pm_lock);
+	ucontrol->value.integer.value[0] = (value == 0x4ff00000);
 
 	return 0;
 }
@@ -402,11 +389,6 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 
 	if (ucontrol->value.integer.value[0] == rt5514->dsp_enabled)
 		return 0;
-
-	mutex_lock(&rt5514->pm_lock);
-	rt5514->wake_count++;
-	pm_wakeup_event(codec->dev, WAKEUP_TIMEOUT);
-	mutex_unlock(&rt5514->pm_lock);
 
 	if (snd_soc_codec_get_bias_level(codec) == SND_SOC_BIAS_OFF) {
 		rt5514->dsp_enabled = ucontrol->value.integer.value[0];
@@ -526,11 +508,6 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 			regcache_sync(rt5514->regmap);
 		}
 	}
-
-	mutex_lock(&rt5514->pm_lock);
-	if (--rt5514->wake_count == 0)
-		pm_relax(codec->dev);
-	mutex_unlock(&rt5514->pm_lock);
 
 	return 0;
 }
@@ -1239,9 +1216,6 @@ static int rt5514_probe(struct snd_soc_codec *codec)
 
 	rt5514->codec = codec;
 	rt5514->pll3_cal_value = 0x0078b000;
-
-	rt5514->wake_count = 0;
-	mutex_init(&rt5514->pm_lock);
 
 	snd_soc_dapm_ignore_suspend(dapm, "DMIC1L");
 	snd_soc_dapm_ignore_suspend(dapm, "DMIC1R");

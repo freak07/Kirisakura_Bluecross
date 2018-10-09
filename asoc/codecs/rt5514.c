@@ -431,8 +431,8 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 					RT5514_DSP_MAPPING,
 					(u8 *)&buf, sizeof(buf));
 #else
-				dev_err(codec->dev, "There is no SPI driver
-					for loading the firmware\n");
+				dev_err(codec->dev,
+					"%d No SPI driver to load fw\n", __LINE__);
 #endif
 				rt5514->pll3_cal_value = buf[0] | buf[1] << 8 |
 					buf[2] << 16 | buf[3] << 24;
@@ -449,8 +449,8 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 				rt5514_spi_burst_write(0x4ff60000, fw->data,
 					((fw->size/8)+1)*8);
 #else
-				dev_err(codec->dev, "There is no SPI driver
-					for loading the firmware\n");
+				dev_err(codec->dev,
+					"%d No SPI driver to load fw\n", __LINE__);
 #endif
 				release_firmware(fw);
 				fw = NULL;
@@ -462,8 +462,8 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 				rt5514_spi_burst_write(0x4ffc0000, fw->data,
 					((fw->size/8)+1)*8);
 #else
-				dev_err(codec->dev, "There is no SPI driver
-					for loading the firmware\n");
+				dev_err(codec->dev,
+					"%d No SPI driver to load fw\n", __LINE__);
 #endif
 				release_firmware(fw);
 				fw = NULL;
@@ -483,7 +483,7 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 				}
 #else
 				dev_err(codec->dev,
-					"No SPI driver for loading firmware\n");
+					"%d No SPI driver to load fw\n", __LINE__);
 #endif
 			} else {
 				request_firmware(&fw, RT5514_FIRMWARE3,

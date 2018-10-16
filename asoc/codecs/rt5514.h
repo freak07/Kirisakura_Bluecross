@@ -247,6 +247,8 @@
 #define RT5514_FIRMWARE2	"rt5514_dsp_fw2.bin"
 #define RT5514_FIRMWARE3	"rt5514_dsp_fw3.bin"
 
+#define BUFFER_SIZE 10
+
 /* System Clock Source */
 enum {
 	RT5514_SCLK_S_MCLK,
@@ -275,6 +277,12 @@ struct rt5514_priv {
 	u8 *model_buf;
 	unsigned int model_len;
 	unsigned int pll3_cal_value;
+	int codec_state;
+};
+
+enum {
+	CODEC_STATE_UNKNOWN = -99,
+	CODEC_STATE_ONLINE = 0,
 };
 
 #endif /* __RT5514_H__ */

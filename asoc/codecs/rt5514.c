@@ -1192,12 +1192,26 @@ static int rt5514_set_bias_level(struct snd_soc_codec *codec,
 	return 0;
 }
 
+static ssize_t codec_state_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct rt5514_priv *rt5514 =
+		(struct rt5514_priv *)dev_get_drvdata(dev);
+
+	if (rt5514)
+		return snprintf(buf, BUFFER_SIZE, "%d", rt5514->codec_state);
+	else
+		return snprintf(buf, BUFFER_SIZE, "%d", CODEC_STATE_UNKNOWN);
+}
+static DEVICE_ATTR_RO(codec_state);
+
 static int rt5514_probe(struct snd_soc_codec *codec)
 {
 	struct rt5514_priv *rt5514 = snd_soc_codec_get_drvdata(codec);
 	struct platform_device *pdev = container_of(codec->dev,
 						   struct platform_device, dev);
 	struct snd_soc_dapm_context *dapm = snd_soc_codec_get_dapm(codec);
+	int ret = 0;
 
 	rt5514->mclk = devm_clk_get(codec->dev, "mclk");
 
@@ -1222,7 +1236,13 @@ static int rt5514_probe(struct snd_soc_codec *codec)
 
 	snd_soc_dapm_sync(dapm);
 
-	return 0;
+	rt5514->codec_state = CODEC_STATE_ONLINE;
+	ret = device_create_file(&pdev->dev, &dev_attr_codec_state);
+	if (ret)
+		dev_err(&pdev->dev, "%s: create codec state node failed\n",
+		 __func__);
+
+	return ret;
 }
 
 static int rt5514_i2c_read(void *context, unsigned int reg, unsigned int *val)

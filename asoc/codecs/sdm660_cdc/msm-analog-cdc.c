@@ -200,6 +200,21 @@ static void msm_anlg_cdc_configure_cap(struct snd_soc_codec *codec,
 				       bool micbias1, bool micbias2);
 static bool msm_anlg_cdc_use_mb(struct snd_soc_codec *codec);
 
+static ssize_t codec_state_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct sdm660_cdc_priv *sdm660_cdc =
+		(struct sdm660_cdc_priv *)dev_get_drvdata(dev);
+
+	if (sdm660_cdc)
+		return snprintf(buf, BUFFER_SIZE, "%d",
+			sdm660_cdc->codec_state);
+	else
+		return snprintf(buf, BUFFER_SIZE, "%d",
+			CODEC_STATE_UNKNOWN);
+}
+static DEVICE_ATTR_RO(codec_state);
+
 static int get_codec_version(struct sdm660_cdc_priv *sdm660_cdc)
 {
 	if (sdm660_cdc->codec_version == DRAX_CDC)
@@ -4633,6 +4648,12 @@ static int msm_anlg_cdc_probe(struct platform_device *pdev)
 	INIT_WORK(&sdm660_cdc->msm_anlg_add_child_devices_work,
 		  msm_anlg_add_child_devices);
 	schedule_work(&sdm660_cdc->msm_anlg_add_child_devices_work);
+
+	sdm660_cdc->codec_state = CODEC_STATE_ONLINE;
+	ret = device_create_file(&pdev->dev, &dev_attr_codec_state);
+	if (ret)
+		dev_err(&pdev->dev, "%s: create codec state node failed\n",
+		 __func__);
 
 	return ret;
 err_supplies:

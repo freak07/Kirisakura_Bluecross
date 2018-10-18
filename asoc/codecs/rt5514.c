@@ -337,9 +337,6 @@ static int rt5514_dsp_frame_flag_get(struct snd_kcontrol *kcontrol,
 		struct snd_ctl_elem_value *ucontrol)
 {
 	u8 buf[8];
-	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
-	struct rt5514_priv *rt5514 = snd_soc_component_get_drvdata(component);
-	struct snd_soc_codec *codec = rt5514->codec;
 	unsigned int value;
 
 	rt5514_spi_burst_read(RT5514_BUFFER_MUSIC_WP, (u8 *)&buf, sizeof(buf));

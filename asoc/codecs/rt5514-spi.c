@@ -662,9 +662,6 @@ static int rt5514_spi_probe(struct spi_device *spi)
 
 static int rt5514_suspend(struct device *dev)
 {
-	struct snd_soc_platform *platform = snd_soc_lookup_platform(dev);
-	struct rt5514_dsp *rt5514_dsp =
-		snd_soc_platform_get_drvdata(platform);
 	int irq = to_spi_device(dev)->irq;
 
 	if (device_may_wakeup(dev))
@@ -675,9 +672,6 @@ static int rt5514_suspend(struct device *dev)
 
 static int rt5514_resume(struct device *dev)
 {
-	struct snd_soc_platform *platform = snd_soc_lookup_platform(dev);
-	struct rt5514_dsp *rt5514_dsp =
-		snd_soc_platform_get_drvdata(platform);
 	int irq = to_spi_device(dev)->irq;
 
 	if (device_may_wakeup(dev))

@@ -300,8 +300,16 @@ static void rt5514_spi_irq_work(struct work_struct *work)
 {
 	struct rt5514_dsp *rt5514_dsp =
 		container_of(work, struct rt5514_dsp, irq_work.work);
-	struct snd_card *card = rt5514_dsp->substream->pcm->card;
+	struct snd_card *card = NULL;
 	int err;
+
+	if (rt5514_dsp->substream == NULL ||
+		rt5514_dsp->substream->pcm == NULL) {
+		pr_err("%s: substream is NULL\n", __func__);
+		return;
+	}
+
+	card = rt5514_dsp->substream->pcm->card;
 
 	mutex_lock(&rt5514_dsp->dma_lock);
 	snd_power_lock(card);

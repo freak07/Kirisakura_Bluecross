@@ -2045,6 +2045,10 @@ static const char * const wsa_spk_text[] = {
 	"ZERO", "WSA"
 };
 
+static const char * const st_mic_bias_text[] = {
+	"ZERO", "ON"
+};
+
 static const struct soc_enum adc2_enum =
 	SOC_ENUM_SINGLE(SND_SOC_NOPM, 0,
 		ARRAY_SIZE(adc2_mux_text), adc2_mux_text);
@@ -2056,6 +2060,10 @@ static const struct soc_enum ext_spk_enum =
 static const struct soc_enum wsa_spk_enum =
 	SOC_ENUM_SINGLE(SND_SOC_NOPM, 0,
 		ARRAY_SIZE(wsa_spk_text), wsa_spk_text);
+
+static const struct soc_enum st_mic_bias_enum =
+	SOC_ENUM_SINGLE(SND_SOC_NOPM, 0,
+		ARRAY_SIZE(st_mic_bias_text), st_mic_bias_text);
 
 
 
@@ -2084,6 +2092,10 @@ static const struct snd_kcontrol_new ear_pa_mux[] = {
 
 static const struct snd_kcontrol_new wsa_spk_mux[] = {
 	SOC_DAPM_ENUM("WSA Spk Switch", wsa_spk_enum)
+};
+
+static const struct snd_kcontrol_new st_mic_bais_mux[] = {
+	SOC_DAPM_ENUM("SoundTrigger Switch", st_mic_bias_enum)
 };
 
 
@@ -3103,6 +3115,8 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"MIC BIAS Internal2", NULL, "MICBIAS_REGULATOR"},
 	{"MIC BIAS External", NULL, "MICBIAS_REGULATOR"},
 	{"MIC BIAS External2", NULL, "MICBIAS_REGULATOR"},
+
+	{"SoundTrigger Switch", "ON", "MIC BIAS Internal1"},
 };
 
 static int msm_anlg_cdc_startup(struct snd_pcm_substream *substream,
@@ -3410,6 +3424,8 @@ static const struct snd_soc_dapm_widget msm_anlg_cdc_dapm_widgets[] = {
 	SND_SOC_DAPM_MUX("Ext Spk Switch", SND_SOC_NOPM, 0, 0, &ext_spk_mux),
 	SND_SOC_DAPM_MUX("LINE_OUT", SND_SOC_NOPM, 0, 0, lo_mux),
 	SND_SOC_DAPM_MUX("ADC2 MUX", SND_SOC_NOPM, 0, 0, &tx_adc2_mux),
+	SND_SOC_DAPM_MUX("SoundTrigger Switch", SND_SOC_NOPM, 0, 0,
+			st_mic_bais_mux),
 
 	SND_SOC_DAPM_MIXER_E("HPHL DAC",
 		MSM89XX_PMIC_ANALOG_RX_HPH_L_PA_DAC_CTL, 3, 0, NULL,

@@ -303,15 +303,16 @@ static void rt5514_spi_irq_work(struct work_struct *work)
 	struct snd_card *card = NULL;
 	int err;
 
+	mutex_lock(&rt5514_dsp->dma_lock);
 	if (rt5514_dsp->substream == NULL ||
 		rt5514_dsp->substream->pcm == NULL) {
 		pr_err("%s: substream is NULL\n", __func__);
+		mutex_unlock(&rt5514_dsp->dma_lock);
 		return;
 	}
 
 	card = rt5514_dsp->substream->pcm->card;
 
-	mutex_lock(&rt5514_dsp->dma_lock);
 	snd_power_lock(card);
 	err = snd_power_wait(card, SNDRV_CTL_POWER_D0);
 	if (err >= 0)

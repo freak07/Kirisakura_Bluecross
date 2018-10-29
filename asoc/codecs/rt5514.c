@@ -333,6 +333,32 @@ static int rt5514_dsp_stream_flag_get(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static int rt5514_dsp_stream_flag_put(struct snd_kcontrol *kcontrol,
+		struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	struct rt5514_priv *rt5514 = snd_soc_component_get_drvdata(component);
+
+	switch (ucontrol->value.integer.value[0]) {
+	case RT5514_DSP_STREAM_HOTWORD:
+		regmap_write(rt5514->i2c_regmap, RT5514_HOTWORD_FLAG, 0x1);
+		regmap_update_bits(rt5514->i2c_regmap, 0x18002e04, 0x1, 0x1);
+		regmap_update_bits(rt5514->i2c_regmap, 0x18002e04, 0x1, 0x0);
+		break;
+
+	case RT5514_DSP_STREAM_MUSDET:
+		regmap_write(rt5514->i2c_regmap, RT5514_MUSDET_FLAG, 0x1);
+		regmap_update_bits(rt5514->i2c_regmap, 0x18002e04, 0x1, 0x1);
+		regmap_update_bits(rt5514->i2c_regmap, 0x18002e04, 0x1, 0x0);
+		break;
+
+	default:
+		break;
+	}
+
+	return 0;
+}
+
 static int rt5514_dsp_frame_flag_get(struct snd_kcontrol *kcontrol,
 		struct snd_ctl_elem_value *ucontrol)
 {
@@ -551,7 +577,7 @@ static const struct snd_kcontrol_new rt5514_snd_controls[] = {
 	SND_SOC_BYTES_TLV("Hotword Model", 0x8504,
 		NULL, rt5514_hotword_model_put),
 	SOC_SINGLE_EXT("DSP Stream Flag", SND_SOC_NOPM, 0, 2, 0,
-		rt5514_dsp_stream_flag_get, NULL),
+		rt5514_dsp_stream_flag_get, rt5514_dsp_stream_flag_put),
 	SOC_SINGLE_EXT("DSP Frame Flag", SND_SOC_NOPM, 0, 1, 0,
 		rt5514_dsp_frame_flag_get, NULL),
 };

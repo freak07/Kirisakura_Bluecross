@@ -310,15 +310,17 @@ static void rt5514_spi_irq_work(struct work_struct *work)
 		mutex_unlock(&rt5514_dsp->dma_lock);
 		return;
 	}
-
 	card = rt5514_dsp->substream->pcm->card;
+	mutex_unlock(&rt5514_dsp->dma_lock);
 
 	snd_power_lock(card);
 	err = snd_power_wait(card, SNDRV_CTL_POWER_D0);
-	if (err >= 0)
+	if (err >= 0) {
+		mutex_lock(&rt5514_dsp->dma_lock);
 		rt5514_schedule_copy(rt5514_dsp);
+		mutex_unlock(&rt5514_dsp->dma_lock);
+	}
 	snd_power_unlock(card);
-	mutex_unlock(&rt5514_dsp->dma_lock);
 }
 
 /* PCM for streaming audio from the DSP buffer */
@@ -372,7 +374,6 @@ static int rt5514_spi_hw_free(struct snd_pcm_substream *substream)
 	mutex_unlock(&rt5514_dsp->dma_lock);
 
 	cancel_delayed_work_sync(&rt5514_dsp->copy_work);
-	cancel_delayed_work_sync(&rt5514_dsp->irq_work);
 
 	rt5514_spi_burst_write(RT5514_HOTWORD_FLAG, buf, 8);
 	rt5514_spi_burst_write(RT5514_MUSDET_FLAG, buf, 8);

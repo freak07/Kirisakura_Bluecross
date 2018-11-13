@@ -1441,6 +1441,10 @@ static int msm_anlg_cdc_codec_enable_on_demand_supply(
 			dev_err(codec->dev, "%s: Failed to enable %s\n",
 				__func__,
 				on_demand_supply_name[w->shift]);
+		else
+			dev_info(codec->dev, "%s: enable %s success\n",
+				__func__,
+				on_demand_supply_name[w->shift]);
 		break;
 	case SND_SOC_DAPM_POST_PMD:
 		if (atomic_read(&supply->ref) == 0) {
@@ -1468,6 +1472,10 @@ static int msm_anlg_cdc_codec_enable_on_demand_supply(
 				dev_err(codec->dev,
 					"Setting regulator optimum mode(dis) failed for micbias with err = %d\n",
 					ret);
+			else
+				dev_info(codec->dev, "%s: disable %s success\n",
+					__func__,
+					on_demand_supply_name[w->shift]);
 		}
 		break;
 	default:

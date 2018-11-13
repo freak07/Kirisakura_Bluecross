@@ -279,8 +279,10 @@ static void rt5514_schedule_copy(struct rt5514_dsp *rt5514_dsp)
 	rt5514_dsp->buf_size = rt5514_dsp->buf_limit - rt5514_dsp->buf_base;
 
 	if (rt5514_dsp->buf_base && rt5514_dsp->buf_limit &&
-		rt5514_dsp->buf_rp && rt5514_dsp->buf_size)
+		rt5514_dsp->buf_rp && rt5514_dsp->buf_size) {
+		pr_info("%s: SPI read buffer start\n", __func__);
 		schedule_delayed_work(&rt5514_dsp->copy_work, 0);
+	}
 }
 
 static irqreturn_t rt5514_spi_irq(int irq, void *data)
@@ -289,7 +291,6 @@ static irqreturn_t rt5514_spi_irq(int irq, void *data)
 
 	pm_wakeup_event(rt5514_dsp->dev,
 		jiffies_to_msecs(WAKEUP_TIMEOUT));
-
 
 	schedule_delayed_work(&rt5514_dsp->irq_work, 5);
 
@@ -370,6 +371,8 @@ static int rt5514_spi_hw_free(struct snd_pcm_substream *substream)
 	char buf[8] = {0};
 
 	mutex_lock(&rt5514_dsp->dma_lock);
+	if (rt5514_stream_flag != RT5514_DSP_NO_STREAM)
+		pr_info("%s: SPI read buffer stop\n", __func__);
 	rt5514_dsp->substream = NULL;
 	mutex_unlock(&rt5514_dsp->dma_lock);
 

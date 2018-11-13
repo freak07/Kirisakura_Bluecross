@@ -1234,6 +1234,8 @@ static int msm_int_audio_mic2_3_event(struct snd_soc_dapm_widget *w,
 		ret = regulator_enable(pdata->mic_vreg);
 		if (ret)
 			pr_err("%s: Failed to enable\n", __func__);
+		else
+			pr_info("%s: enabled success\n", __func__);
 		break;
 	case SND_SOC_DAPM_POST_PMD:
 		ret = regulator_disable(pdata->mic_vreg);
@@ -1250,6 +1252,8 @@ static int msm_int_audio_mic2_3_event(struct snd_soc_dapm_widget *w,
 			pr_err("%s: Setting regulator optimum mode(en) failed for micbias with err = %d\n",
 				__func__, ret);
 			goto out;
+		} else {
+			pr_info("%s: disable success\n", __func__);
 		}
 	default:
 		break;

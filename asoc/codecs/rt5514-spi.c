@@ -174,6 +174,13 @@ static void rt5514_spi_copy_work(struct work_struct *work)
 			sizeof(buf));
 		cur_wp = buf[0] | buf[1] << 8 | buf[2] << 16 |
 					buf[3] << 24;
+		if ((cur_wp & 0xfff00000) != RT5514_BUFFER_ADDR_RANGE) {
+			dev_err(rt5514_dsp->dev, "Address read fail! 0x%x\n",
+				cur_wp);
+			schedule_delayed_work(&rt5514_dsp->copy_work,
+				msecs_to_jiffies(50));
+			goto done;
+		}
 
 		if (cur_wp >= rt5514_dsp->buf_rp)
 			remain_data = (cur_wp - rt5514_dsp->buf_rp);
@@ -264,14 +271,29 @@ static void rt5514_schedule_copy(struct rt5514_dsp *rt5514_dsp)
 	rt5514_spi_burst_read(base_addr, (u8 *)&buf, sizeof(buf));
 	rt5514_dsp->buf_base = buf[0] | buf[1] << 8 | buf[2] << 16 |
 				buf[3] << 24;
+	if ((rt5514_dsp->buf_base & 0xfff00000) != RT5514_BUFFER_ADDR_RANGE) {
+		dev_err(rt5514_dsp->dev, "Base address read fail! 0x%x\n",
+			rt5514_dsp->buf_base);
+		return;
+	}
 
 	rt5514_spi_burst_read(limit_addr, (u8 *)&buf, sizeof(buf));
 	rt5514_dsp->buf_limit = buf[0] | buf[1] << 8 | buf[2] << 16 |
 				buf[3] << 24;
+	if ((rt5514_dsp->buf_limit & 0xfff00000) != RT5514_BUFFER_ADDR_RANGE) {
+		dev_err(rt5514_dsp->dev, "Limit address read fail! 0x%x\n",
+			rt5514_dsp->buf_limit);
+		return;
+	}
 
 	rt5514_spi_burst_read(rt5514_dsp->buf_rp_addr, (u8 *)&buf, sizeof(buf));
 	rt5514_dsp->buf_rp = buf[0] | buf[1] << 8 | buf[2] << 16 |
 				buf[3] << 24;
+	if ((rt5514_dsp->buf_rp & 0xfff00000) != RT5514_BUFFER_ADDR_RANGE) {
+		dev_err(rt5514_dsp->dev, "Buffer address read fail! 0x%x\n",
+			rt5514_dsp->buf_rp);
+		return;
+	}
 
 	if (rt5514_dsp->buf_rp % 8)
 		rt5514_dsp->buf_rp = (rt5514_dsp->buf_rp / 8) * 8;

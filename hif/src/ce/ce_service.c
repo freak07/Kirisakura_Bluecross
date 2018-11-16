@@ -89,7 +89,10 @@ void hif_ce_war_enable(void)
 	hif_ce_war1 = 1;
 }
 
+/*
 #ifdef CONFIG_SLUB_DEBUG_ON
+*/
+#if 1
 
 /**
  * struct hif_ce_event - structure for detailing a ce event
@@ -108,7 +111,7 @@ struct hif_ce_desc_event {
 };
 
 /* max history to record per copy engine */
-#define HIF_CE_HISTORY_MAX 512
+#define HIF_CE_HISTORY_MAX 2048
 qdf_atomic_t hif_ce_desc_history_index[CE_COUNT_MAX];
 struct hif_ce_desc_event hif_ce_desc_history[CE_COUNT_MAX][HIF_CE_HISTORY_MAX];
 

@@ -1460,6 +1460,10 @@ config TOUCHSCREEN_HIMAX_CHIPSET
 
           If unsure, say N.
 
+config WAKE_GESTURES
+	bool "wake gestures"
+
+
 source "drivers/input/touchscreen/hxchipset/Kconfig"
 
 config TOUCHSCREEN_EKTF3XXX_CHIPSET

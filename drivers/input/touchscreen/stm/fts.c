@@ -100,6 +100,15 @@
 #define TYPE_B_PROTOCOL
 #endif
 
+#ifdef CONFIG_WAKE_GESTURES
+#include <linux/wake_gestures.h>
+static bool is_suspended;
+bool scr_suspended_blueline(void)
+{
+	return is_suspended;
+}
+#endif
+
 extern SysInfo systemInfo;
 extern TestToDo tests;
 #ifdef GESTURE_MODE
@@ -2555,6 +2564,11 @@ static bool fts_enter_pointer_event_handler(struct fts_ts_info *info, unsigned
 	/* pr_info("%s : TouchID = %d,Touchcount = %d\n", __func__,
 	  *	touchId,touchcount); */
 
+#ifdef CONFIG_WAKE_GESTURES
+	if (is_suspended)
+		x += 5000;
+#endif
+
 	input_report_abs(info->input_dev, ABS_MT_POSITION_X, x);
 	input_report_abs(info->input_dev, ABS_MT_POSITION_Y, y);
 	input_report_abs(info->input_dev, ABS_MT_TOUCH_MAJOR, major);
@@ -3865,6 +3879,13 @@ static void fts_resume_work(struct work_struct *work)
 
 	info = container_of(work, struct fts_ts_info, resume_work);
 
+#ifdef CONFIG_WAKE_GESTURES
+	disable_irq_wake(info->client->irq);
+	fts_system_reset();
+	release_all_touches(info);
+	return;
+#endif
+
 	if (!info->sensor_sleep)
 		return;
 
@@ -3904,6 +3925,12 @@ static void fts_suspend_work(struct work_struct *work)
 	struct fts_ts_info *info;
 
 	info = container_of(work, struct fts_ts_info, suspend_work);
+
+#ifdef CONFIG_WAKE_GESTURES
+	enable_irq_wake(info->client->irq);
+	release_all_touches(info);
+	return;
+#endif
 
 	if (info->sensor_sleep)
 		return;
@@ -4025,12 +4052,28 @@ static int fts_screen_state_chg_callback(struct notifier_block *nb,
 	switch (blank) {
 	case MSM_DRM_BLANK_POWERDOWN:
 	case MSM_DRM_BLANK_LP:
+#ifdef CONFIG_WAKE_GESTURES
+		if (wg_switch) {
+			is_suspended = true;
+			break;
+		}
+#endif
 		if (val == MSM_DRM_EARLY_EVENT_BLANK) {
 			pr_info("%s: BLANK\n", __func__);
 			fts_set_bus_ref(info, FTS_BUS_REF_SCREEN_ON, false);
 		}
 		break;
 	case MSM_DRM_BLANK_UNBLANK:
+#ifdef CONFIG_WAKE_GESTURES
+		if (wg_switch) {
+			is_suspended = false;
+			break;
+		}
+		if (wg_changed) {
+			wg_switch = wg_switch_temp;
+			wg_changed = false;
+		}
+#endif
 		if (val == MSM_DRM_EVENT_BLANK) {
 			pr_info("%s: UNBLANK\n", __func__);
 			fts_set_bus_ref(info, FTS_BUS_REF_SCREEN_ON, true);

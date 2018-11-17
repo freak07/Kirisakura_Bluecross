@@ -1340,4 +1340,8 @@ config TOUCHSCREEN_EKTF3XXX_CHIPSET
 
 		  If unusre, say N.
 
+config WAKE_GESTURES
+	bool "wake gestures"
+
+
 endif

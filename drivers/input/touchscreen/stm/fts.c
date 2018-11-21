@@ -3880,10 +3880,12 @@ static void fts_resume_work(struct work_struct *work)
 	info = container_of(work, struct fts_ts_info, resume_work);
 
 #ifdef CONFIG_WAKE_GESTURES
-	disable_irq_wake(info->client->irq);
-	fts_system_reset();
-	release_all_touches(info);
-	return;
+	if (wg_switch) {
+		disable_irq_wake(info->client->irq);
+		fts_system_reset();
+		release_all_touches(info);
+		return;
+	}
 #endif
 
 	if (!info->sensor_sleep)
@@ -3927,9 +3929,11 @@ static void fts_suspend_work(struct work_struct *work)
 	info = container_of(work, struct fts_ts_info, suspend_work);
 
 #ifdef CONFIG_WAKE_GESTURES
-	enable_irq_wake(info->client->irq);
-	release_all_touches(info);
-	return;
+	if (wg_switch) {
+		enable_irq_wake(info->client->irq);
+		release_all_touches(info);
+		return;
+	}
 #endif
 
 	if (info->sensor_sleep)

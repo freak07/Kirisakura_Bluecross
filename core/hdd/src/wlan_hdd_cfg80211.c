@@ -2196,6 +2196,8 @@ __wlan_hdd_cfg80211_get_supported_features(struct wiphy *wiphy,
 	if (hdd_scan_random_mac_addr_supported())
 		fset |= WIFI_FEATURE_SCAN_RAND;
 
+	fset |= WIFI_FEATURE_P2P_RAND_MAC;
+
 	skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, sizeof(fset) +
 						  NLMSG_HDRLEN);
 	if (!skb) {

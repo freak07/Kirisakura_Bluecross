@@ -253,6 +253,7 @@ typedef enum {
 /* Support Tx Power Limit setting */
 #define WIFI_FEATURE_SET_TX_POWER_LIMIT 0x4000000
 
+#define WIFI_FEATURE_P2P_RAND_MAC       0x80000000 /* Support P2P MAC randomization */
 
 /**
  * typedef struct sHddAvoidFreqRange - avoid frequency range

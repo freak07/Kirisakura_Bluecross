@@ -129,11 +129,13 @@ void wcd_enable_curr_micbias(const struct wcd_mbhc *mbhc,
 
 	switch (cs_mb_en) {
 	case WCD_MBHC_EN_CS:
+#ifndef CONFIG_MBHC_CS_DISABLE
 		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_MICB_CTRL, 0);
 		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_BTN_ISRC_CTL, 3);
 		/* Program Button threshold registers as per CS */
 		wcd_program_btn_threshold(mbhc, false);
 		break;
+#endif
 	case WCD_MBHC_EN_MB:
 		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_BTN_ISRC_CTL, 0);
 		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_FSM_EN, 1);

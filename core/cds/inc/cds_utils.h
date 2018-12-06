@@ -110,6 +110,11 @@ enum cds_band_type {
  *			off the async scan
  * ENABLE_DBS_CXN_AND_ENABLE_SCAN_WITH_ASYNC_SCAN_OFF: enable dbs support for
  *			connection and scan but switch off the async scan
+ * ENABLE_DBS_CXN_AND_DISABLE_DBS_SCAN: Enable DBS support for connection and
+ *          disable DBS support for scan
+ * ENABLE_DBS_CXN_AND_DISABLE_SIMULTANEOUS_SCAN: Enable DBS
+ *          support for connection and disable simultaneous scan
+ *          from upper layer (DBS scan remains enabled in FW)
  */
 enum dbs_support {
 	ENABLE_DBS_CXN_AND_SCAN,
@@ -117,6 +122,8 @@ enum dbs_support {
 	DISABLE_DBS_CXN_AND_ENABLE_DBS_SCAN,
 	DISABLE_DBS_CXN_AND_ENABLE_DBS_SCAN_WITH_ASYNC_SCAN_OFF,
 	ENABLE_DBS_CXN_AND_ENABLE_SCAN_WITH_ASYNC_SCAN_OFF,
+	ENABLE_DBS_CXN_AND_DISABLE_DBS_SCAN,
+	ENABLE_DBS_CXN_AND_DISABLE_SIMULTANEOUS_SCAN,
 };
 
 /*-------------------------------------------------------------------------

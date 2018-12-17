@@ -1502,8 +1502,8 @@ static void *def_msm_int_wcd_mbhc_cal(void)
 	btn_high[2] = (u16)237.5;
 	btn_low[3] = (u16)437.5;
 	btn_high[3] = (u16)437.5;
-	btn_low[4] = 500;
-	btn_high[4] = 500;
+	btn_low[4] = (u16)437.5;
+	btn_high[4] = (u16)437.5;
 
 	return msm_int_wcd_cal;
 }

@@ -328,8 +328,7 @@ static irqreturn_t rt5514_spi_irq(int irq, void *data)
 {
 	struct rt5514_dsp *rt5514_dsp = data;
 
-	pm_wakeup_event(rt5514_dsp->dev,
-		jiffies_to_msecs(WAKEUP_TIMEOUT));
+	pm_wakeup_event(rt5514_dsp->dev, WAKEUP_TIMEOUT);
 
 	schedule_delayed_work(&rt5514_dsp->irq_work, 5);
 

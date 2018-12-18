@@ -1022,10 +1022,13 @@ int wcd_mbhc_get_button_mask(struct wcd_mbhc *mbhc)
 		mask = SND_JACK_BTN_5;
 		break;
 	default:
+		pr_info("%s: btn %d no matching mask", __func__, btn);
 		break;
 	}
-	pr_info("%s: btn %d, key_code %d, mask 0x%x\n", __func__,
-		btn, mbhc->mbhc_cfg->key_code[btn], mask);
+	if (btn >= 0 && btn < WCD_MBHC_KEYCODE_NUM) {
+		pr_info("%s: btn %d, key_code %d, mask 0x%x\n", __func__,
+			btn, mbhc->mbhc_cfg->key_code[btn], mask);
+	}
 	return mask;
 }
 EXPORT_SYMBOL(wcd_mbhc_get_button_mask);

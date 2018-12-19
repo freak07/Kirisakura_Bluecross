@@ -166,6 +166,13 @@ static void rt5514_spi_copy_work(struct work_struct *work)
 	runtime = rt5514_dsp->substream->runtime;
 	period_bytes = snd_pcm_lib_period_bytes(rt5514_dsp->substream);
 
+	/* check if hw has space for one period_size */
+	if (snd_pcm_capture_hw_avail(runtime) <= runtime->period_size) {
+		schedule_delayed_work(&rt5514_dsp->copy_work,
+				msecs_to_jiffies(50));
+		goto done;
+	}
+
 	if (rt5514_dsp->buf_size % period_bytes)
 		rt5514_dsp->buf_size = (rt5514_dsp->buf_size / period_bytes) *
 			period_bytes;

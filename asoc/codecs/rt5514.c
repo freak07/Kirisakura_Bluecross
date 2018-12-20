@@ -34,6 +34,7 @@
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
 #include "rt5514-spi.h"
 #endif
+#include "wcd-mbhc-v2.h"
 
 #define RESET_CMD_DELAY 2000
 
@@ -314,6 +315,27 @@ static const DECLARE_TLV_DB_RANGE(bst_tlv,
 
 static const DECLARE_TLV_DB_SCALE(adc_vol_tlv, -1725, 75, 0);
 
+static int mic_switch = RT5514_SWITCH_MIC1;
+int rt5514_event_notify(struct snd_soc_codec *codec, int mic)
+{
+	struct rt5514_priv *rt5514 = snd_soc_codec_get_drvdata(codec);
+
+	pr_info("%s: notify mic = %d\n", __func__, mic);
+	mic_switch = mic;
+	switch (mic_switch) {
+	case RT5514_SWITCH_MIC1:
+		regmap_write(rt5514->i2c_regmap, 0x180020a4, 0x00808002);
+		break;
+	case RT5514_SWITCH_MIC2:
+		regmap_write(rt5514->i2c_regmap, 0x180020a4, 0x00809002);
+		regmap_write(rt5514->i2c_regmap, 0x18002104, 0x34023541);
+		break;
+	default:
+		return -EINVAL;
+	}
+	return 0;
+}
+
 static int rt5514_dsp_voice_wake_up_get(struct snd_kcontrol *kcontrol,
 		struct snd_ctl_elem_value *ucontrol)
 {
@@ -524,6 +546,10 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 				regmap_write(rt5514->i2c_regmap, 0x18002124,
 					0xe0220042);
 			}
+
+			msleep(20);
+			rt5514_event_notify(codec, mic_switch);
+
 		} else {
 			regmap_multi_reg_write(rt5514->i2c_regmap,
 				rt5514_i2c_patch, ARRAY_SIZE(rt5514_i2c_patch));
@@ -1266,7 +1292,7 @@ static int rt5514_probe(struct snd_soc_codec *codec)
 	if (ret)
 		dev_err(&pdev->dev, "%s: create codec state node failed\n",
 		 __func__);
-
+	wcd_register_callback(codec, &rt5514_event_notify);
 	return ret;
 }
 

@@ -2585,7 +2585,7 @@ lim_send_dfs_chan_sw_ie_update(tpAniSirGlobal pMac, tpPESession psessionEntry)
 	}
 
 	/* Send update beacon template message */
-	lim_send_beacon_ind(pMac, psessionEntry);
+	lim_send_beacon_ind(pMac, psessionEntry, REASON_CHANNEL_SWITCH);
 	pe_debug("Updated CSA IE, IE COUNT: %d",
 		       psessionEntry->gLimChannelSwitch.switchCount);
 
@@ -2663,7 +2663,8 @@ lim_send_sme_ap_channel_switch_resp(tpAniSirGlobal pMac,
 	if (!is_ch_dfs) {
 		if (channelId == psessionEntry->currentOperChannel) {
 			lim_apply_configuration(pMac, psessionEntry);
-			lim_send_beacon_ind(pMac, psessionEntry);
+			lim_send_beacon_ind(pMac, psessionEntry,
+					    REASON_CONFIG_UPDATE);
 		} else {
 			pe_debug("Failed to Transmit Beacons on channel: %d after AP channel change response",
 				       psessionEntry->bcnLen);
@@ -2693,7 +2694,6 @@ lim_process_beacon_tx_success_ind(tpAniSirGlobal pMac, uint16_t msgType, void *e
 	tpPESession psessionEntry;
 	tSirMsgQ mmhMsg;
 	tSirSmeCSAIeTxCompleteRsp *pChanSwTxResponse;
-	struct sir_beacon_tx_complete_rsp *beacon_tx_comp_rsp_ptr;
 	uint8_t length = sizeof(tSirSmeCSAIeTxCompleteRsp);
 	tpSirFirstBeaconTxCompleteInd pBcnTxInd =
 		(tSirFirstBeaconTxCompleteInd *) event;
@@ -2763,22 +2763,9 @@ lim_process_beacon_tx_success_ind(tpAniSirGlobal pMac, uint16_t msgType, void *e
 	}
 
 	if (LIM_IS_AP_ROLE(psessionEntry) &&
-		psessionEntry->gLimOperatingMode.present) {
-		/* Done with nss update, send response back to SME */
+	    psessionEntry->gLimOperatingMode.present)
+		/* Done with nss update */
 		psessionEntry->gLimOperatingMode.present = 0;
-		beacon_tx_comp_rsp_ptr = (struct sir_beacon_tx_complete_rsp *)
-				qdf_mem_malloc(sizeof(*beacon_tx_comp_rsp_ptr));
-		if (NULL == beacon_tx_comp_rsp_ptr) {
-			pe_err("AllocateMemory failed for beacon_tx_comp_rsp_ptr");
-			return;
-		}
-		beacon_tx_comp_rsp_ptr->session_id =
-			psessionEntry->smeSessionId;
-		beacon_tx_comp_rsp_ptr->tx_status = QDF_STATUS_SUCCESS;
-		mmhMsg.type = eWNI_SME_NSS_UPDATE_RSP;
-		mmhMsg.bodyptr = beacon_tx_comp_rsp_ptr;
-		mmhMsg.bodyval = 0;
-		lim_sys_process_mmh_msg_api(pMac, &mmhMsg, ePROT);
-	}
+
 	return;
 }

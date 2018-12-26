@@ -503,15 +503,41 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 	struct rt5514_priv *rt5514 = snd_soc_component_get_drvdata(component);
 	struct snd_soc_codec *codec = rt5514->codec;
 	const struct firmware *fw = NULL;
+	int dsp_enabled_last;
 	u8 buf[8];
 
 	if (ucontrol->value.integer.value[0] == rt5514->dsp_enabled)
 		return 0;
 
 	if (snd_soc_codec_get_bias_level(codec) == SND_SOC_BIAS_OFF) {
+		dsp_enabled_last = rt5514->dsp_enabled;
 		rt5514->dsp_enabled = ucontrol->value.integer.value[0];
 
 		if (rt5514->dsp_enabled) {
+			if (dsp_enabled_last > 0) {
+				switch (rt5514->dsp_enabled) {
+				case RT5514_DSP_HOTWORD:
+					regmap_write(rt5514->i2c_regmap,
+						RT5514_DSP_FUNCTION,
+						RT5514_DSP_HOTWORD);
+					break;
+
+				case RT5514_DSP_MUSDET:
+					regmap_write(rt5514->i2c_regmap,
+						RT5514_DSP_FUNCTION,
+						RT5514_DSP_MUSDET);
+					break;
+
+				default:
+					regmap_write(rt5514->i2c_regmap,
+						RT5514_DSP_FUNCTION,
+						RT5514_DSP_BOTH);
+					break;
+				}
+
+				return 0;
+			}
+
 			if (!IS_ERR(rt5514->dsp_calib_clk) &&
 				rt5514->pdata.dsp_calib_clk_name) {
 				if (clk_set_rate(rt5514->dsp_calib_clk,
@@ -542,6 +568,26 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 			}
 
 			rt5514_enable_dsp_prepare(rt5514);
+
+			switch (rt5514->dsp_enabled) {
+			case RT5514_DSP_HOTWORD:
+				regmap_write(rt5514->i2c_regmap,
+					RT5514_DSP_FUNCTION,
+					RT5514_DSP_HOTWORD);
+				break;
+
+			case RT5514_DSP_MUSDET:
+				regmap_write(rt5514->i2c_regmap,
+					RT5514_DSP_FUNCTION,
+					RT5514_DSP_MUSDET);
+				break;
+
+			default:
+				regmap_write(rt5514->i2c_regmap,
+					RT5514_DSP_FUNCTION,
+					RT5514_DSP_BOTH);
+				break;
+			}
 
 			request_firmware(&fw, RT5514_FIRMWARE1, codec->dev);
 			if (fw) {
@@ -709,7 +755,7 @@ static const struct snd_kcontrol_new rt5514_snd_controls[] = {
 	SOC_DOUBLE_R_TLV("ADC2 Capture Volume", RT5514_DOWNFILTER1_CTRL1,
 		RT5514_DOWNFILTER1_CTRL2, RT5514_AD_GAIN_SFT, 63, 0,
 		adc_vol_tlv),
-	SOC_SINGLE_EXT("DSP Voice Wake Up", SND_SOC_NOPM, 0, 1, 0,
+	SOC_SINGLE_EXT("DSP Voice Wake Up", SND_SOC_NOPM, 0, 3, 0,
 		rt5514_dsp_voice_wake_up_get, rt5514_dsp_voice_wake_up_put),
 	SND_SOC_BYTES_TLV("Hotword Model", 0x8504,
 		NULL, rt5514_hotword_model_put),

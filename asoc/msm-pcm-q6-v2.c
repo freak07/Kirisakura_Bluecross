@@ -638,6 +638,7 @@ static int msm_pcm_open(struct snd_pcm_substream *substream)
 	if (!prtd->audio_client) {
 		pr_info("%s: Could not allocate memory\n", __func__);
 		kfree(prtd);
+		prtd = NULL;
 		return -ENOMEM;
 	}
 
@@ -1131,6 +1132,12 @@ static int msm_pcm_adsp_stream_cmd_put(struct snd_kcontrol *kcontrol,
 	}
 
 	prtd = substream->runtime->private_data;
+	if (prtd == NULL) {
+		pr_err("%s prtd is null.\n", __func__);
+		ret = -EINVAL;
+		goto done;
+	}
+
 	if (prtd->audio_client == NULL) {
 		pr_err("%s prtd is null.\n", __func__);
 		ret = -EINVAL;
@@ -1315,7 +1322,7 @@ static int msm_pcm_volume_ctl_get(struct snd_kcontrol *kcontrol,
 		return -ENODEV;
 	}
 	if (!substream->runtime) {
-		pr_err("%s substream runtime not found\n", __func__);
+		pr_debug("%s substream runtime not found\n", __func__);
 		return 0;
 	}
 	prtd = substream->runtime->private_data;
@@ -1402,7 +1409,7 @@ static int msm_pcm_compress_ctl_get(struct snd_kcontrol *kcontrol,
 		return -EINVAL;
 	}
 	if (!substream->runtime) {
-		pr_err("%s substream runtime not found\n", __func__);
+		pr_debug("%s substream runtime not found\n", __func__);
 		return 0;
 	}
 	prtd = substream->runtime->private_data;
@@ -1898,6 +1905,7 @@ static struct platform_driver msm_pcm_driver = {
 		.name = "msm-pcm-dsp",
 		.owner = THIS_MODULE,
 		.of_match_table = msm_pcm_dt_match,
+		.suppress_bind_attrs = true,
 	},
 	.probe = msm_pcm_probe,
 	.remove = msm_pcm_remove,

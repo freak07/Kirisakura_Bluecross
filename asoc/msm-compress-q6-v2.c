@@ -540,7 +540,7 @@ static int msm_compr_read_buffer(struct msm_compr_audio *prtd)
 			__func__, ret);
 		return ret;
 	}
-	prtd->bytes_read += buffer_length;
+	prtd->bytes_read += buffer_length + prtd->ts_header_offset;
 	prtd->bytes_read_offset += buffer_length + prtd->ts_header_offset;
 	if (prtd->bytes_read_offset >= prtd->buffer_size)
 		prtd->bytes_read_offset -= prtd->buffer_size;
@@ -1521,9 +1521,10 @@ static int msm_compr_configure_dsp_for_capture(struct snd_compr_stream *cstream)
 	pr_debug("%s: sample_rate = %d channels = %d bps = %d sample_word_size = %d\n",
 			__func__, prtd->sample_rate, prtd->num_channels,
 					 bits_per_sample, sample_word_size);
-	ret = q6asm_enc_cfg_blk_pcm_format_support_v3(prtd->audio_client,
+	ret = q6asm_enc_cfg_blk_pcm_format_support_v4(prtd->audio_client,
 					prtd->sample_rate, prtd->num_channels,
-					bits_per_sample, sample_word_size);
+					bits_per_sample, sample_word_size,
+					ASM_LITTLE_ENDIAN, DEFAULT_QF);
 
 	return ret;
 }
@@ -3236,7 +3237,7 @@ static int msm_compr_audio_effects_config_get(struct snd_kcontrol *kcontrol,
 	cstream = pdata->cstream[fe_id];
 	audio_effects = pdata->audio_effects[fe_id];
 	if (!cstream || !audio_effects) {
-		pr_err("%s: stream or effects inactive\n", __func__);
+		pr_debug("%s: stream or effects inactive\n", __func__);
 		return -EINVAL;
 	}
 	prtd = cstream->runtime->private_data;
@@ -4559,6 +4560,7 @@ static struct platform_driver msm_compr_driver = {
 		.name = "msm-compress-dsp",
 		.owner = THIS_MODULE,
 		.of_match_table = msm_compr_dt_match,
+		.suppress_bind_attrs = true,
 	},
 	.probe = msm_compr_dev_probe,
 	.remove = msm_compr_remove,

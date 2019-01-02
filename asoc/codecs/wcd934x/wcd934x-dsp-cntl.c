@@ -1014,9 +1014,11 @@ static ssize_t wcd_miscdev_write(struct file *filep, const char __user *ubuf,
 {
 	struct wcd_dsp_cntl *cntl = container_of(filep->private_data,
 						 struct wcd_dsp_cntl, miscdev);
-	char val[WCD_MISCDEV_CMD_MAX_LEN];
+	char val[WCD_MISCDEV_CMD_MAX_LEN + 1];
 	bool vote;
 	int ret = 0;
+
+	memset(val, 0, WCD_MISCDEV_CMD_MAX_LEN + 1);
 
 	if (count == 0 || count > WCD_MISCDEV_CMD_MAX_LEN) {
 		pr_err("%s: Invalid count = %zd\n", __func__, count);
@@ -1039,7 +1041,8 @@ static ssize_t wcd_miscdev_write(struct file *filep, const char __user *ubuf,
 	} else if (val[0] == '0') {
 		if (cntl->boot_reqs == 0) {
 			dev_err(cntl->codec->dev,
-				"%s: WDSP already disabled\n", __func__);
+				"%s: WDSP already disabled\n",
+				__func__);
 			ret = -EINVAL;
 			goto done;
 		}
@@ -1048,8 +1051,7 @@ static ssize_t wcd_miscdev_write(struct file *filep, const char __user *ubuf,
 	} else if (!strcmp(val, "DEBUG_DUMP")) {
 		if (cntl->dbg_dmp_enable) {
 			dev_dbg(cntl->codec->dev,
-				"%s: Collect dumps for debug use\n",
-				__func__);
+				"%s: Collect dumps for debug use\n", __func__);
 			wcd_cntl_collect_debug_dumps(cntl, false);
 		}
 		/*

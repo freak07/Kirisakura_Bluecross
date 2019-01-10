@@ -189,6 +189,14 @@ struct wdsp_mgr_priv {
 	/* Debugfs related */
 	struct dentry *entry;
 	bool panic_on_error;
+
+	ktime_t ktime_zero;
+	ktime_t uptime;
+	ktime_t crashtime;
+	s64 total_uptime;
+	s64 total_downtime;
+	u64 crash_count;
+	u64 recover_count;
 };
 
 static char *wdsp_get_ssr_type_string(enum wdsp_ssr_type type)
@@ -533,6 +541,7 @@ static int wdsp_enable_dsp(struct wdsp_mgr_priv *wdsp)
 	/* Make sure wdsp is in good state */
 	if (!WDSP_STATUS_IS_SET(wdsp, WDSP_STATUS_CODE_DLOADED)) {
 		WDSP_ERR(wdsp, "WDSP in invalid state 0x%x", wdsp->status);
+		wdsp->recover_count++;
 		/*
 		 * Since DSP state indicates that code sections are
 		 * not downloaded. Try to download them again now.
@@ -564,6 +573,15 @@ static int wdsp_enable_dsp(struct wdsp_mgr_priv *wdsp)
 
 	wdsp_broadcast_event_downseq(wdsp, WDSP_EVENT_POST_BOOTUP, NULL);
 	WDSP_SET_STATUS(wdsp, WDSP_STATUS_BOOTED);
+
+	wdsp->uptime = ktime_get_boottime();
+
+	if (!ktime_equal(wdsp->crashtime, wdsp->ktime_zero)) {
+		wdsp->total_downtime +=
+			ktime_ms_delta(wdsp->uptime,
+					wdsp->crashtime);
+		wdsp->crashtime = wdsp->ktime_zero;
+	}
 done:
 	WDSP_MGR_MUTEX_UNLOCK(wdsp, wdsp->ssr_mutex);
 	return ret;
@@ -584,6 +602,13 @@ static int wdsp_disable_dsp(struct wdsp_mgr_priv *wdsp)
 		__wdsp_set_ready_locked(wdsp, WDSP_SSR_STATUS_WDSP_READY, true);
 		WDSP_MGR_MUTEX_UNLOCK(wdsp, wdsp->ssr_mutex);
 		return 0;
+	}
+
+	if (!ktime_equal(wdsp->uptime, wdsp->ktime_zero)) {
+		wdsp->total_uptime +=
+			ktime_ms_delta(ktime_get_boottime(),
+					wdsp->uptime);
+		wdsp->uptime = wdsp->ktime_zero;
 	}
 
 	WDSP_MGR_MUTEX_UNLOCK(wdsp, wdsp->ssr_mutex);
@@ -853,6 +878,15 @@ static int wdsp_ssr_handler(struct wdsp_mgr_priv *wdsp, void *arg,
 		__wdsp_clr_ready_locked(wdsp, WDSP_SSR_STATUS_WDSP_READY);
 		wdsp_broadcast_event_downseq(wdsp, WDSP_EVENT_PRE_SHUTDOWN,
 					     NULL);
+		wdsp->crashtime = ktime_get_boottime();
+
+		if (!ktime_equal(wdsp->uptime, wdsp->ktime_zero)) {
+			wdsp->total_uptime +=
+				ktime_ms_delta(wdsp->crashtime,
+						wdsp->uptime);
+			wdsp->uptime = wdsp->ktime_zero;
+		}
+		wdsp->crash_count++;
 		schedule_work(&wdsp->ssr_work);
 		break;
 
@@ -1107,6 +1141,45 @@ static int wdsp_mgr_compare_of(struct device *dev, void *data)
 		 !strcmp(dev_name(dev), cmpnt->cdev_name)));
 }
 
+static ssize_t
+wdsp_stat_show(struct device *dev,
+		struct device_attribute *a, char *buf)
+{
+	struct wdsp_mgr_priv *wdsp = dev_get_drvdata(dev);
+	ssize_t ret = 0;
+
+	ktime_t tmp;
+
+	if (!ktime_equal(wdsp->uptime, wdsp->ktime_zero)) {
+		tmp = ktime_get_boottime();
+		wdsp->total_uptime +=
+			ktime_ms_delta(tmp, wdsp->uptime);
+		wdsp->uptime = tmp;
+	}
+
+	if (!ktime_equal(wdsp->crashtime, wdsp->ktime_zero)) {
+		tmp = ktime_get_boottime();
+		wdsp->total_downtime +=
+			ktime_ms_delta(tmp, wdsp->crashtime);
+		wdsp->crashtime = tmp;
+	}
+
+	ret = snprintf(buf, PAGE_SIZE, "%lld,%lld,%llu,%llu",
+			wdsp->total_uptime,
+			wdsp->total_downtime,
+			wdsp->crash_count,
+			wdsp->recover_count);
+
+	wdsp->total_uptime = 0;
+	wdsp->total_downtime = 0;
+	wdsp->recover_count = 0;
+	wdsp->crash_count = 0;
+
+	return ret;
+}
+
+static DEVICE_ATTR_RO(wdsp_stat);
+
 static void wdsp_mgr_debugfs_init(struct wdsp_mgr_priv *wdsp)
 {
 	wdsp->entry = debugfs_create_dir("wdsp_mgr", NULL);
@@ -1122,6 +1195,15 @@ static void wdsp_mgr_debugfs_remove(struct wdsp_mgr_priv *wdsp)
 	debugfs_remove_recursive(wdsp->entry);
 	wdsp->entry = NULL;
 }
+
+static struct attribute *wdsp_stat_attrs[] = {
+	&dev_attr_wdsp_stat.attr,
+	NULL,
+};
+
+static const struct attribute_group wdsp_mgr_group = {
+	.attrs = wdsp_stat_attrs,
+};
 
 static int wdsp_mgr_bind(struct device *dev)
 {
@@ -1331,6 +1413,12 @@ static int wdsp_mgr_probe(struct platform_device *pdev)
 		dev_err(wdsp->mdev, "wakeup init failed: %d\n", ret);
 	}
 
+	wdsp->ktime_zero = ktime_set(0, 0);
+
+	if (sysfs_create_group(&mdev->kobj,
+				&wdsp_mgr_group))
+		pr_err("%s: Could not create sysfs groups\n", __func__);
+
 	return 0;
 
 err_master_add:
@@ -1348,6 +1436,9 @@ static int wdsp_mgr_remove(struct platform_device *pdev)
 {
 	struct device *mdev = &pdev->dev;
 	struct wdsp_mgr_priv *wdsp = dev_get_drvdata(mdev);
+
+	sysfs_remove_group(&mdev->kobj,
+				&wdsp_mgr_group);
 
 	device_init_wakeup(mdev, false);
 

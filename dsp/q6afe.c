@@ -2720,6 +2720,8 @@ int afe_tdm_port_start(u16 port_id, struct afe_tdm_port_config *tdm_port,
 	int index = 0;
 	uint16_t port_index = 0;
 	enum afe_mad_type mad_type = MAD_HW_NONE;
+	struct cal_block_data *cal_block = NULL;
+	struct audio_cal_info_afe_top *afe_top;
 
 	if (!tdm_port) {
 		pr_err("%s: Error, no configuration data\n", __func__);
@@ -2755,6 +2757,10 @@ int afe_tdm_port_start(u16 port_id, struct afe_tdm_port_config *tdm_port,
 
 	/* Also send the topology id here: */
 	port_index = afe_get_port_index(port_id);
+
+	cal_block = afe_find_cal_topo_id_by_port(
+		this_afe.cal_data[AFE_TOPOLOGY_CAL], port_id);
+
 	if (!(this_afe.afe_cal_mode[port_index] == AFE_CAL_MODE_NONE)) {
 		/* One time call: only for first time */
 		afe_send_custom_topology();
@@ -2832,6 +2838,14 @@ int afe_tdm_port_start(u16 port_id, struct afe_tdm_port_config *tdm_port,
 			pr_err("%s: afe send failed %d\n", __func__, ret);
 			goto fail_cmd;
 		}
+	}
+
+	if (cal_block != NULL) {
+		afe_top = (struct audio_cal_info_afe_top *)cal_block->cal_info;
+		pr_info("%s: top_id:%x acdb_id:%d port_id:0x%x\n",
+			__func__, afe_top->topology, afe_top->acdb_id, port_id);
+	} else {
+		pr_info("%s: port_id:0x%x\n", __func__, port_id);
 	}
 
 	ret = afe_send_cmd_port_start(port_id);
@@ -3249,6 +3263,8 @@ static int __afe_port_start(u16 port_id, union afe_port_config *afe_config,
 	int index = 0;
 	enum afe_mad_type mad_type;
 	uint16_t port_index;
+	struct cal_block_data *cal_block = NULL;
+	struct audio_cal_info_afe_top *afe_top;
 
 	if (!afe_config) {
 		pr_err("%s: Error, no configuration data\n", __func__);
@@ -3312,6 +3328,10 @@ static int __afe_port_start(u16 port_id, union afe_port_config *afe_config,
 	mutex_lock(&this_afe.afe_cmd_lock);
 	/* Also send the topology id here: */
 	port_index = afe_get_port_index(port_id);
+
+	cal_block = afe_find_cal_topo_id_by_port(
+		this_afe.cal_data[AFE_TOPOLOGY_CAL], port_id);
+
 	if (!(this_afe.afe_cal_mode[port_index] == AFE_CAL_MODE_NONE)) {
 		/* One time call: only for first time */
 		afe_send_custom_topology();
@@ -3552,6 +3572,15 @@ static int __afe_port_start(u16 port_id, union afe_port_config *afe_config,
 		ret = -EINVAL;
 		goto fail_cmd;
 	}
+
+	if (cal_block != NULL) {
+		afe_top = (struct audio_cal_info_afe_top *)cal_block->cal_info;
+		pr_info("%s: top_id:%x acdb_id:%d port_id:0x%x\n",
+			__func__, afe_top->topology, afe_top->acdb_id, port_id);
+	} else {
+		pr_info("%s: port_id:0x%x\n", __func__, port_id);
+	}
+
 	ret = afe_send_cmd_port_start(port_id);
 
 fail_cmd:
@@ -5885,7 +5914,7 @@ int afe_close(int port_id)
 		ret = -EINVAL;
 		goto fail_cmd;
 	}
-	pr_debug("%s: port_id = 0x%x\n", __func__, port_id);
+	pr_info("%s: port_id = 0x%x\n", __func__, port_id);
 	if ((port_id == RT_PROXY_DAI_001_RX) ||
 			(port_id == RT_PROXY_DAI_002_TX)) {
 		pr_debug("%s: before decrementing pcm_afe_instance %d\n",

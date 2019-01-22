@@ -2659,11 +2659,8 @@ static int msm_anlg_cdc_codec_micbias_control(struct snd_soc_dapm_widget *w,
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
 		if (mbhc->mbhc_cb->set_micbias_value && mbhc->micbias_enable) {
-			WCD_MBHC_RSC_LOCK(mbhc);
-			wcd_mbhc_hs_elec_irq(mbhc, WCD_MBHC_ELEC_HS_REM, false);
 			mbhc->mbhc_cb->set_micbias_value(codec);
 			lower_micbias = true;
-			WCD_MBHC_RSC_UNLOCK(mbhc);
 		}
 		break;
 	case SND_SOC_DAPM_POST_PMD:

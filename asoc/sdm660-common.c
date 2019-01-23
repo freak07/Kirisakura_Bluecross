@@ -2867,6 +2867,8 @@ static int msm_populate_dai_link_component_of_node(
 
 		/* populate platform_of_node for snd card dai links */
 		if (dai_link[i].platform_name &&
+				strcmp(dai_link[i].platform_name,
+					"spi32765.0") &&
 				!dai_link[i].platform_of_node) {
 			index = of_property_match_string(cdev->of_node,
 					"asoc-platform-names",
@@ -3439,6 +3441,7 @@ static struct platform_driver sdm660_asoc_machine_driver = {
 		.owner = THIS_MODULE,
 		.pm = &snd_soc_pm_ops,
 		.of_match_table = sdm660_asoc_machine_of_match,
+		.suppress_bind_attrs = true,
 	},
 	.probe = msm_asoc_machine_probe,
 	.remove = msm_asoc_machine_remove,

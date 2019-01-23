@@ -639,16 +639,18 @@ static void wcd_correct_swch_plug(struct work_struct *work)
 	WCD_MBHC_RSC_UNLOCK(mbhc);
 
 	/* Check for cross connection */
-	do {
-		cross_conn = wcd_check_cross_conn(mbhc);
-		try++;
-	} while (try < mbhc->swap_thr);
+	if (mbhc->swap_detect) {
+		do {
+			cross_conn = wcd_check_cross_conn(mbhc);
+			try++;
+		} while (try < mbhc->swap_thr);
 
-	if (cross_conn > 0) {
-		plug_type = MBHC_PLUG_TYPE_GND_MIC_SWAP;
-		pr_debug("%s: cross connection found, Plug type %d\n",
-			 __func__, plug_type);
-		goto correct_plug_type;
+		if (cross_conn > 0) {
+			plug_type = MBHC_PLUG_TYPE_GND_MIC_SWAP;
+			pr_debug("%s: cross connection found, Plug type %d\n",
+				 __func__, plug_type);
+			goto correct_plug_type;
+		}
 	}
 	/* Find plug type */
 	output_mv = wcd_measure_adc_continuous(mbhc);
@@ -726,7 +728,7 @@ correct_plug_type:
 		if (mbhc->mbhc_cb->hph_pa_on_status)
 			is_pa_on = mbhc->mbhc_cb->hph_pa_on_status(mbhc->codec);
 
-		if ((output_mv <= hs_threshold) &&
+		if (mbhc->swap_detect && (output_mv <= hs_threshold) &&
 		    (!is_pa_on)) {
 			/* Check for cross connection*/
 			ret = wcd_check_cross_conn(mbhc);
@@ -778,6 +780,8 @@ correct_plug_type:
 					continue;
 				}
 			}
+		} else if (!mbhc->swap_detect) {
+			plug_type = MBHC_PLUG_TYPE_HEADSET;
 		}
 
 		if (output_mv > hs_threshold) {
@@ -945,7 +949,6 @@ static irqreturn_t wcd_mbhc_adc_hs_rem_irq(int irq, void *data)
 
 	timeout = jiffies +
 		  msecs_to_jiffies(WCD_FAKE_REMOVAL_MIN_PERIOD_MS);
-	adc_threshold = wcd_mbhc_adc_get_hs_thres(mbhc);
 
 	do {
 		retry++;
@@ -954,6 +957,7 @@ static irqreturn_t wcd_mbhc_adc_hs_rem_irq(int irq, void *data)
 		 * any change in IN2_P
 		 */
 		usleep_range(10000, 10100);
+		adc_threshold = wcd_mbhc_adc_get_hs_thres(mbhc);
 		output_mv = wcd_measure_adc_once(mbhc, MUX_CTL_IN2P);
 
 		pr_debug("%s: Check for fake removal: output_mv %d\n",

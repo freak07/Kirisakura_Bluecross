@@ -613,6 +613,8 @@ static struct wcd_mbhc_register
 			  WCD9335_MBHC_CTL_2, 0x03, 0, 0),
 	WCD_MBHC_REGISTER("WCD_MBHC_HS_COMP_RESULT",
 			  WCD9335_ANA_MBHC_RESULT_3, 0x08, 3, 0),
+	WCD_MBHC_REGISTER("WCD_MBHC_IN2P_CLAMP_STATE",
+			  WCD9335_ANA_MBHC_RESULT_3, 0x10, 4, 0),
 	WCD_MBHC_REGISTER("WCD_MBHC_MIC_SCHMT_RESULT",
 			  WCD9335_ANA_MBHC_RESULT_3, 0x20, 5, 0),
 	WCD_MBHC_REGISTER("WCD_MBHC_HPHL_SCHMT_RESULT",
@@ -14317,6 +14319,7 @@ static struct platform_driver tasha_codec_driver = {
 #ifdef CONFIG_PM
 		.pm = &tasha_pm_ops,
 #endif
+		.suppress_bind_attrs = true,
 	},
 };
 

@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -517,7 +517,7 @@ static int msm_pcm_volume_ctl_get(struct snd_kcontrol *kcontrol,
 
 	pr_debug("%s\n", __func__);
 	if ((!substream) || (!substream->runtime)) {
-		pr_err("%s substream or runtime not found\n", __func__);
+		pr_debug("%s substream or runtime not found\n", __func__);
 		rc = -ENODEV;
 		goto exit;
 	}
@@ -780,6 +780,7 @@ static struct platform_driver msm_pcm_driver = {
 		.name = "msm-pcm-loopback",
 		.owner = THIS_MODULE,
 		.of_match_table = msm_pcm_loopback_dt_match,
+		.suppress_bind_attrs = true,
 	},
 	.probe = msm_pcm_probe,
 	.remove = msm_pcm_remove,

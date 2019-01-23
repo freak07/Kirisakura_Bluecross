@@ -4401,8 +4401,8 @@ static int __iw_get_name(struct net_device *dev,
  * Return: 0 on success, error number otherwise
  */
 static int iw_get_name(struct net_device *dev,
-			 struct iw_request_info *info,
-			 union iwreq_data *wrqu, char *extra)
+		       struct iw_request_info *info,
+		       union iwreq_data *wrqu, char *extra)
 {
 	int ret;
 

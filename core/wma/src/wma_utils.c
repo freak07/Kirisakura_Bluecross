@@ -6322,23 +6322,23 @@ int wma_roam_scan_stats_event_handler(void *handle, uint8_t *event,
 						     &res);
 
 	/* vdev_id can be invalid though status is success, hence validate */
-		if (vdev_id >= wma_handle->max_bssid) {
+	if (vdev_id >= wma_handle->max_bssid) {
 		WMA_LOGE(FL("Received invalid vdev_id: %d"), vdev_id);
 		ret  = -EINVAL;
 		goto free_res;
-		}
+	}
 
 	/* Get interface for valid vdev_id */
-		iface = &wma_handle->interfaces[vdev_id];
+	iface = &wma_handle->interfaces[vdev_id];
 	if (!iface) {
 		WMI_LOGE(FL("Interface not available for vdev_id: %d"),
 			 vdev_id);
 		ret  = -EINVAL;
 		goto free_res;
-		}
+	}
 
-		roam_scan_stats_req = iface->roam_scan_stats_req;
-		iface->roam_scan_stats_req = NULL;
+	roam_scan_stats_req = iface->roam_scan_stats_req;
+	iface->roam_scan_stats_req = NULL;
 	if (!roam_scan_stats_req) {
 		WMI_LOGE(FL("No pending request vdev_id: %d"), vdev_id);
 		ret  = -EINVAL;
@@ -6356,12 +6356,12 @@ int wma_roam_scan_stats_event_handler(void *handle, uint8_t *event,
 	(roam_scan_stats_req->cb)(roam_scan_stats_req->context, res);
 
 free_roam_scan_stats_req:
-		qdf_mem_free(roam_scan_stats_req);
+	qdf_mem_free(roam_scan_stats_req);
 	roam_scan_stats_req = NULL;
 
 free_res:
-		qdf_mem_free(res);
-		res = NULL;
+	qdf_mem_free(res);
+	res = NULL;
 
 	return ret;
 }

@@ -173,7 +173,7 @@ tSirRetStatus lim_send_beacon_params(tpAniSirGlobal pMac,
 		pe_err("Posting WMA_UPDATE_BEACON_IND, reason=%X",
 			retCode);
 	}
-	lim_send_beacon_ind(pMac, psessionEntry);
+	lim_send_beacon_ind(pMac, psessionEntry, REASON_DEFAULT);
 	return retCode;
 }
 

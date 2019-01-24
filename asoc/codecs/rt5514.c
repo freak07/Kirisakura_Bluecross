@@ -615,13 +615,15 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 				fw = NULL;
 			}
 
-			if (rt5514->model_buf && rt5514->model_len) {
+			if (rt5514->hotword_model_buf &&
+				rt5514->hotword_model_len) {
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
 				int ret;
 
-				ret = rt5514_spi_burst_write(0x4ffae000,
-					rt5514->model_buf,
-					((rt5514->model_len / 8) + 1) * 8);
+				ret = rt5514_spi_burst_write(0x4ffab800,
+					rt5514->hotword_model_buf,
+					((rt5514->hotword_model_len / 8) + 1)
+					* 8);
 				if (ret) {
 					dev_err(codec->dev,
 						"Model load failed %d\n", ret);
@@ -629,14 +631,50 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 				}
 #else
 				dev_err(codec->dev,
-					"%d No SPI driver to load fw\n", __LINE__);
+					"%d No SPI driver to load fw\n",
+					__LINE__);
 #endif
 			} else {
 				request_firmware(&fw, RT5514_FIRMWARE3,
 						 codec->dev);
 				if (fw) {
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
-					rt5514_spi_burst_write(0x4ffae000,
+					rt5514_spi_burst_write(0x4ffab800,
+						fw->data,
+						((fw->size/8)+1)*8);
+#else
+					dev_err(codec->dev,
+						"No SPI driver to load fw\n");
+#endif
+					release_firmware(fw);
+					fw = NULL;
+				}
+			}
+
+			if (rt5514->musdet_model_buf &&
+				rt5514->musdet_model_len) {
+#if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
+				int ret;
+
+				ret = rt5514_spi_burst_write(0x4ffb2400,
+					rt5514->musdet_model_buf,
+					((rt5514->musdet_model_len / 8) + 1)
+					* 8);
+				if (ret) {
+					dev_err(codec->dev,
+						"Model load failed %d\n", ret);
+					return ret;
+				}
+#else
+				dev_err(codec->dev,
+					"No SPI driver for loading firmware\n");
+#endif
+			} else {
+				request_firmware(&fw, RT5514_FIRMWARE4,
+						 codec->dev);
+				if (fw) {
+#if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
+					rt5514_spi_burst_write(0x4ffb2400,
 						fw->data,
 						((fw->size/8)+1)*8);
 #else
@@ -674,7 +712,19 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 				}
 
 				if (rt5514_fw_validate(rt5514, RT5514_FIRMWARE3,
-					0x4ffae000)) {
+					0x4ffab800)) {
+					rt5514->dsp_enabled = 0;
+					regmap_multi_reg_write(
+						rt5514->i2c_regmap,
+						rt5514_i2c_patch,
+						ARRAY_SIZE(rt5514_i2c_patch));
+					regcache_mark_dirty(rt5514->regmap);
+					regcache_sync(rt5514->regmap);
+					return 0;
+				}
+
+				if (rt5514_fw_validate(rt5514, RT5514_FIRMWARE4,
+					0x4ffb2400)) {
 					rt5514->dsp_enabled = 0;
 					regmap_multi_reg_write(
 						rt5514->i2c_regmap,
@@ -726,23 +776,47 @@ static int rt5514_hotword_model_put(struct snd_kcontrol *kcontrol,
 	struct snd_soc_codec *codec = rt5514->codec;
 	int ret = 0;
 
-	if (rt5514->model_buf || rt5514->model_len < size) {
-		if (rt5514->model_buf)
-			devm_kfree(codec->dev, rt5514->model_buf);
-		rt5514->model_buf = devm_kmalloc(codec->dev, size, GFP_KERNEL);
-		if (!rt5514->model_buf) {
+	if (rt5514->hotword_model_buf || rt5514->hotword_model_len < size) {
+		if (rt5514->hotword_model_buf)
+			devm_kfree(codec->dev, rt5514->hotword_model_buf);
+		rt5514->hotword_model_buf = devm_kmalloc(codec->dev, size,
+			GFP_KERNEL);
+		if (!rt5514->hotword_model_buf) {
 			ret = -ENOMEM;
 			goto done;
 		}
 	}
 
-	/* Skips the TLV header. */
-	bytes += 2;
-
-	if (copy_from_user(rt5514->model_buf, bytes, size))
+	if (copy_from_user(rt5514->hotword_model_buf, bytes, size))
 		ret = -EFAULT;
 done:
-	rt5514->model_len = (ret ? 0 : size);
+	rt5514->hotword_model_len = (ret ? 0 : size);
+	return ret;
+}
+
+static int rt5514_musdet_model_put(struct snd_kcontrol *kcontrol,
+		const unsigned int __user *bytes, unsigned int size)
+{
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	struct rt5514_priv *rt5514 = snd_soc_component_get_drvdata(component);
+	struct snd_soc_codec *codec = rt5514->codec;
+	int ret = 0;
+
+	if (rt5514->musdet_model_buf || rt5514->musdet_model_len < size) {
+		if (rt5514->musdet_model_buf)
+			devm_kfree(codec->dev, rt5514->musdet_model_buf);
+		rt5514->musdet_model_buf = devm_kmalloc(codec->dev, size,
+			GFP_KERNEL);
+		if (!rt5514->musdet_model_buf) {
+			ret = -ENOMEM;
+			goto done;
+		}
+	}
+
+	if (copy_from_user(rt5514->musdet_model_buf, bytes, size))
+		ret = -EFAULT;
+done:
+	rt5514->musdet_model_len = (ret ? 0 : size);
 	return ret;
 }
 
@@ -757,8 +831,10 @@ static const struct snd_kcontrol_new rt5514_snd_controls[] = {
 		adc_vol_tlv),
 	SOC_SINGLE_EXT("DSP Voice Wake Up", SND_SOC_NOPM, 0, 3, 0,
 		rt5514_dsp_voice_wake_up_get, rt5514_dsp_voice_wake_up_put),
-	SND_SOC_BYTES_TLV("Hotword Model", 0x8504,
-		NULL, rt5514_hotword_model_put),
+	SND_SOC_BYTES_TLV("Hotword Model", 0x6800, NULL,
+		rt5514_hotword_model_put),
+	SND_SOC_BYTES_TLV("Musdet Model", 0x5c00, NULL,
+		rt5514_musdet_model_put),
 	SOC_SINGLE_EXT("DSP Stream Flag", SND_SOC_NOPM, 0, 2, 0,
 		rt5514_dsp_stream_flag_get, rt5514_dsp_stream_flag_put),
 	SOC_SINGLE_EXT("DSP Frame Flag", SND_SOC_NOPM, 0, 1, 0,

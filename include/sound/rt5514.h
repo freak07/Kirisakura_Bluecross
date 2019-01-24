@@ -2,7 +2,7 @@
  * linux/sound/rt5514.h -- Platform data for RT5514
  *
  * Copyright 2016 Realtek Semiconductor Corp.
- * Author: Oder Chiou <oder_chiou@xxxxxxxxxxx>
+ * Author: Oder Chiou <oder_chiou@realtek.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as

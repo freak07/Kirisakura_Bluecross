@@ -593,7 +593,7 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 			if (fw) {
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
 				rt5514_spi_burst_write(0x4ff60000, fw->data,
-					((fw->size/8)+1)*8);
+					fw->size);
 #else
 				dev_err(codec->dev,
 					"%d No SPI driver to load fw\n", __LINE__);
@@ -606,7 +606,7 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 			if (fw) {
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
 				rt5514_spi_burst_write(0x4ffc0000, fw->data,
-					((fw->size/8)+1)*8);
+					fw->size);
 #else
 				dev_err(codec->dev,
 					"%d No SPI driver to load fw\n", __LINE__);
@@ -622,8 +622,7 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 
 				ret = rt5514_spi_burst_write(0x4ffab800,
 					rt5514->hotword_model_buf,
-					((rt5514->hotword_model_len / 8) + 1)
-					* 8);
+					rt5514->hotword_model_len);
 				if (ret) {
 					dev_err(codec->dev,
 						"Model load failed %d\n", ret);
@@ -640,8 +639,7 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 				if (fw) {
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
 					rt5514_spi_burst_write(0x4ffab800,
-						fw->data,
-						((fw->size/8)+1)*8);
+						fw->data, fw->size);
 #else
 					dev_err(codec->dev,
 						"No SPI driver to load fw\n");
@@ -658,8 +656,7 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 
 				ret = rt5514_spi_burst_write(0x4ffb3000,
 					rt5514->musdet_model_buf,
-					((rt5514->musdet_model_len / 8) + 1)
-					* 8);
+					rt5514->musdet_model_len);
 				if (ret) {
 					dev_err(codec->dev,
 						"Model load failed %d\n", ret);
@@ -675,8 +672,7 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 				if (fw) {
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
 					rt5514_spi_burst_write(0x4ffb3000,
-						fw->data,
-						((fw->size/8)+1)*8);
+						fw->data, fw->size);
 #else
 					dev_err(codec->dev,
 						"No SPI driver to load fw\n");

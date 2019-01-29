@@ -30,6 +30,7 @@
 		qcom,mdss-dsi-lane-2-state;
 		qcom,mdss-dsi-lane-3-state;
 		qcom,mdss-dsi-reset-sequence = <1 10>, <0 1>, <1 0>;
+		qcom,mdss-mdp-transfer-time-us = <7000>;
 
 		qcom,mdss-dsi-bl-pmic-control-type = "bl_ctrl_dcs";
 		qcom,mdss-dsi-bl-vr-min-safe-level = <0xa>;
@@ -53,12 +54,14 @@
 		/* qcom,esd-check-enabled; */
 		qcom,mdss-dsi-panel-status-check-mode = "te_signal_check";
 
-		qcom,mdss-dsi-init-delay-us = <5000>;
+		qcom,mdss-dsi-init-delay-us = <2500>;
 
 		qcom,mdss-pan-physical-width-dimension  = <70>;
 		qcom,mdss-pan-physical-height-dimension = <144>;
 
 		qcom,ulps-enabled;
+		qcom,suspend-ulps-enabled;
+		qcom,panel-allow-phy-poweroff;
 
 		qcom,mdss-dsi-display-timings {
 			timing@0 {
@@ -76,6 +79,7 @@
 				qcom,mdss-dsi-h-right-border = <0>;
 				qcom,mdss-dsi-v-top-border = <0>;
 				qcom,mdss-dsi-v-bottom-border = <0>;
+				qcom,mdss-dsi-panel-jitter = <0x5 0x1>;
 				qcom,mdss-dsi-on-command = [
 					07 01 00 00 00 00 01 01    /* Compression Enable */
 					05 01 00 00 78 00 01 11    /* sleep out, Wait 120 ms */

@@ -125,6 +125,7 @@ static struct wcd_mbhc_register
 	WCD_MBHC_REGISTER("WCD_MBHC_HS_COMP_RESULT",
 			  MSM89XX_PMIC_ANALOG_MBHC_ZDET_ELECT_RESULT, 0x01,
 			  0, 0),
+	WCD_MBHC_REGISTER("WCD_MBHC_IN2P_CLAMP_STATE", 0, 0, 0, 0),
 	WCD_MBHC_REGISTER("WCD_MBHC_MIC_SCHMT_RESULT",
 			  MSM89XX_PMIC_ANALOG_MBHC_ZDET_ELECT_RESULT, 0x02,
 			  1, 0),
@@ -198,6 +199,21 @@ static void msm_anlg_cdc_set_auto_zeroing(struct snd_soc_codec *codec,
 static void msm_anlg_cdc_configure_cap(struct snd_soc_codec *codec,
 				       bool micbias1, bool micbias2);
 static bool msm_anlg_cdc_use_mb(struct snd_soc_codec *codec);
+
+static ssize_t codec_state_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct sdm660_cdc_priv *sdm660_cdc =
+		(struct sdm660_cdc_priv *)dev_get_drvdata(dev);
+
+	if (sdm660_cdc)
+		return snprintf(buf, BUFFER_SIZE, "%d",
+			sdm660_cdc->codec_state);
+	else
+		return snprintf(buf, BUFFER_SIZE, "%d",
+			CODEC_STATE_UNKNOWN);
+}
+static DEVICE_ATTR_RO(codec_state);
 
 static int get_codec_version(struct sdm660_cdc_priv *sdm660_cdc)
 {
@@ -859,7 +875,7 @@ exit:
 	msm_anlg_cdc_compute_impedance(codec, impedance_l, impedance_r,
 				      zl, zr, high);
 
-	dev_dbg(codec->dev, "%s: RL %d ohm, RR %d ohm\n", __func__, *zl, *zr);
+	dev_info(codec->dev, "%s: RL %d ohm, RR %d ohm\n", __func__, *zl, *zr);
 	dev_dbg(codec->dev, "%s: Impedance detection completed\n", __func__);
 }
 
@@ -1425,6 +1441,10 @@ static int msm_anlg_cdc_codec_enable_on_demand_supply(
 			dev_err(codec->dev, "%s: Failed to enable %s\n",
 				__func__,
 				on_demand_supply_name[w->shift]);
+		else
+			dev_info(codec->dev, "%s: enable %s success\n",
+				__func__,
+				on_demand_supply_name[w->shift]);
 		break;
 	case SND_SOC_DAPM_POST_PMD:
 		if (atomic_read(&supply->ref) == 0) {
@@ -1452,6 +1472,10 @@ static int msm_anlg_cdc_codec_enable_on_demand_supply(
 				dev_err(codec->dev,
 					"Setting regulator optimum mode(dis) failed for micbias with err = %d\n",
 					ret);
+			else
+				dev_info(codec->dev, "%s: disable %s success\n",
+					__func__,
+					on_demand_supply_name[w->shift]);
 		}
 		break;
 	default:
@@ -2029,6 +2053,10 @@ static const char * const wsa_spk_text[] = {
 	"ZERO", "WSA"
 };
 
+static const char * const st_mic_bias_text[] = {
+	"ZERO", "ON"
+};
+
 static const struct soc_enum adc2_enum =
 	SOC_ENUM_SINGLE(SND_SOC_NOPM, 0,
 		ARRAY_SIZE(adc2_mux_text), adc2_mux_text);
@@ -2040,6 +2068,10 @@ static const struct soc_enum ext_spk_enum =
 static const struct soc_enum wsa_spk_enum =
 	SOC_ENUM_SINGLE(SND_SOC_NOPM, 0,
 		ARRAY_SIZE(wsa_spk_text), wsa_spk_text);
+
+static const struct soc_enum st_mic_bias_enum =
+	SOC_ENUM_SINGLE(SND_SOC_NOPM, 0,
+		ARRAY_SIZE(st_mic_bias_text), st_mic_bias_text);
 
 
 
@@ -2068,6 +2100,10 @@ static const struct snd_kcontrol_new ear_pa_mux[] = {
 
 static const struct snd_kcontrol_new wsa_spk_mux[] = {
 	SOC_DAPM_ENUM("WSA Spk Switch", wsa_spk_enum)
+};
+
+static const struct snd_kcontrol_new st_mic_bais_mux[] = {
+	SOC_DAPM_ENUM("SoundTrigger Switch", st_mic_bias_enum)
 };
 
 
@@ -3080,7 +3116,6 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"ADC2_INP2", NULL, "AMIC2"},
 	{"ADC2_INP3", NULL, "AMIC3"},
 
-	{"MIC BIAS Internal1", NULL, "INT_LDO_H"},
 	{"MIC BIAS Internal2", NULL, "INT_LDO_H"},
 	{"MIC BIAS External", NULL, "INT_LDO_H"},
 	{"MIC BIAS External2", NULL, "INT_LDO_H"},
@@ -3088,6 +3123,8 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"MIC BIAS Internal2", NULL, "MICBIAS_REGULATOR"},
 	{"MIC BIAS External", NULL, "MICBIAS_REGULATOR"},
 	{"MIC BIAS External2", NULL, "MICBIAS_REGULATOR"},
+
+	{"SoundTrigger Switch", "ON", "MIC BIAS Internal1"},
 };
 
 static int msm_anlg_cdc_startup(struct snd_pcm_substream *substream,
@@ -3395,6 +3432,8 @@ static const struct snd_soc_dapm_widget msm_anlg_cdc_dapm_widgets[] = {
 	SND_SOC_DAPM_MUX("Ext Spk Switch", SND_SOC_NOPM, 0, 0, &ext_spk_mux),
 	SND_SOC_DAPM_MUX("LINE_OUT", SND_SOC_NOPM, 0, 0, lo_mux),
 	SND_SOC_DAPM_MUX("ADC2 MUX", SND_SOC_NOPM, 0, 0, &tx_adc2_mux),
+	SND_SOC_DAPM_MUX("SoundTrigger Switch", SND_SOC_NOPM, 0, 0,
+			st_mic_bais_mux),
 
 	SND_SOC_DAPM_MIXER_E("HPHL DAC",
 		MSM89XX_PMIC_ANALOG_RX_HPH_L_PA_DAC_CTL, 3, 0, NULL,
@@ -3838,6 +3877,11 @@ static int sdm660_cdc_notifier_service_cb(struct notifier_block *nb,
 		}
 		dev_dbg(codec->dev,
 			"ADSP is about to power down. teardown/reset codec\n");
+#if defined(CONFIG_CIRRUS_SPKR_PROTECTION)
+		dev_dbg(codec->dev,
+			"%s: clear the afe config of cirrus port\n", __func__);
+		afe_clear_config(AFE_CIRRUS_PORT_CONFIG);
+#endif
 		msm_anlg_cdc_device_down(codec);
 		break;
 	case AUDIO_NOTIFIER_SERVICE_UP:
@@ -4628,6 +4672,12 @@ static int msm_anlg_cdc_probe(struct platform_device *pdev)
 	INIT_WORK(&sdm660_cdc->msm_anlg_add_child_devices_work,
 		  msm_anlg_add_child_devices);
 	schedule_work(&sdm660_cdc->msm_anlg_add_child_devices_work);
+
+	sdm660_cdc->codec_state = CODEC_STATE_ONLINE;
+	ret = device_create_file(&pdev->dev, &dev_attr_codec_state);
+	if (ret)
+		dev_err(&pdev->dev, "%s: create codec state node failed\n",
+		 __func__);
 
 	return ret;
 err_supplies:

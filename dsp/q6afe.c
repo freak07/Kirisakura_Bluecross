@@ -798,6 +798,7 @@ extern int afe_apr_send_pkt_crus(void *data, int index, int set)
 	else /* get */
 		return afe_apr_send_pkt(data, 0);
 }
+EXPORT_SYMBOL(afe_apr_send_pkt_crus);
 #endif
 
 static int afe_send_cal_block(u16 port_id, struct cal_block_data *cal_block)
@@ -3902,6 +3903,9 @@ int afe_get_port_index(u16 port_id)
 		return -EINVAL;
 	}
 }
+#if defined(CONFIG_CIRRUS_SPKR_PROTECTION)
+EXPORT_SYMBOL(afe_get_port_index);
+#endif
 
 int afe_open(u16 port_id,
 		union afe_port_config *afe_config, int rate)

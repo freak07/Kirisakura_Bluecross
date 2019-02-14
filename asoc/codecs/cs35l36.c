@@ -175,6 +175,11 @@ static int cs35l36_main_amp_event(struct snd_soc_dapm_widget *w,
 
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
+		if (!cs35l36->pdata.extern_boost)
+			regmap_update_bits(cs35l36->regmap, CS35L36_PWR_CTRL2,
+						CS35L36_BST_EN_MASK,
+						CS35L36_BST_EN <<
+						CS35L36_BST_EN_SHIFT);
 		regmap_update_bits(cs35l36->regmap, CS35L36_PWR_CTRL1,
 					CS35L36_GLOBAL_EN_MASK,
 					1 << CS35L36_GLOBAL_EN_SHIFT);
@@ -187,11 +192,17 @@ static int cs35l36_main_amp_event(struct snd_soc_dapm_widget *w,
 		regmap_update_bits(cs35l36->regmap, CS35L36_ASP_RX1_SEL,
 					CS35L36_PCM_RX_SEL_MASK,
 					CS35L36_PCM_RX_SEL_PCM);
+		regmap_update_bits(cs35l36->regmap, CS35L36_AMP_OUT_MUTE,
+					CS35L36_AMP_MUTE_MASK,
+					0 << CS35L36_AMP_MUTE_SHIFT);
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
 		regmap_update_bits(cs35l36->regmap, CS35L36_ASP_RX1_SEL,
 					CS35L36_PCM_RX_SEL_MASK,
 					CS35L36_PCM_RX_SEL_ZERO);
+		regmap_update_bits(cs35l36->regmap, CS35L36_AMP_OUT_MUTE,
+					CS35L36_AMP_MUTE_MASK,
+					1 << CS35L36_AMP_MUTE_SHIFT);
 		break;
 	case SND_SOC_DAPM_POST_PMD:
 		regmap_update_bits(cs35l36->regmap, CS35L36_PWR_CTRL1,
@@ -225,6 +236,11 @@ static int cs35l36_boost_event(struct snd_soc_dapm_widget *w,
 						CS35L36_BST_EN_MASK,
 						CS35L36_BST_DIS_VP <<
 						CS35L36_BST_EN_SHIFT);
+
+		regmap_update_bits(cs35l36->regmap, CS35L36_PWR_CTRL1,
+					CS35L36_GLOBAL_EN_MASK,
+					0 << CS35L36_GLOBAL_EN_SHIFT);
+		usleep_range(2000, 2100);
 		break;
 	default:
 		dev_dbg(codec->dev, "Invalid event = 0x%x\n", event);
@@ -358,6 +374,7 @@ static const struct snd_soc_dapm_widget cs35l36_dapm_widgets[] = {
 	SND_SOC_DAPM_ADC("IMON ADC", NULL, CS35L36_PWR_CTRL2, 13, 0),
 	SND_SOC_DAPM_ADC("VPMON ADC", NULL, CS35L36_PWR_CTRL2, 8, 0),
 	SND_SOC_DAPM_ADC("VBSTMON ADC", NULL, CS35L36_PWR_CTRL2, 9, 0),
+	SND_SOC_DAPM_ADC("CLASS H", NULL, CS35L36_PWR_CTRL3, 4, 0),
 
 	SND_SOC_DAPM_INPUT("VP"),
 	SND_SOC_DAPM_INPUT("VBST"),
@@ -422,6 +439,7 @@ static const struct snd_soc_dapm_route cs35l36_audio_map[] = {
 	{"BOOST Mux", "On", "Channel Mux"},
 	{"CLASS H", NULL, "BOOST Mux"},
 	{"Main AMP", NULL, "Channel Mux"},
+	{"CLASS H", NULL, "SDIN"},
 	{"Main AMP", NULL, "CLASS H"},
 	{"SPK", NULL, "Main AMP"},
 };
@@ -578,8 +596,10 @@ static int cs35l36_dai_set_sysclk(struct snd_soc_dai *dai,
 	}
 
 	if (cs35l36->sclk <= 6000000) {
-		fs1_val = 3 * ((24000000 + cs35l36->sclk - 1) / cs35l36->sclk) + 4;
-		fs2_val = 5 * ((24000000 + cs35l36->sclk - 1) / cs35l36->sclk) + 4;
+		fs1_val = 3 *
+			((24000000 + cs35l36->sclk - 1) / cs35l36->sclk) + 4;
+		fs2_val = 5 *
+			((24000000 + cs35l36->sclk - 1) / cs35l36->sclk) + 4;
 	}
 	regmap_write(cs35l36->regmap, CS35L36_TESTKEY_CTRL,
 			CS35L36_TEST_UNLOCK1);
@@ -703,6 +723,7 @@ static int cs35l36_codec_set_sysclk(struct snd_soc_codec *codec,
 {
 	struct cs35l36_private *cs35l36 = snd_soc_codec_get_drvdata(codec);
 	int ret;
+
 	cs35l36->extclk_freq = freq;
 
 	cs35l36->prev_clksrc = cs35l36->clksrc;
@@ -996,7 +1017,8 @@ static int cs35l36_codec_probe(struct snd_soc_codec *codec)
 				CS35L36_SYNC_GLOBAL_OVR_MASK,
 				0 << CS35L36_SYNC_GLOBAL_OVR_SHIFT);
 
-	if (codec->component.name_prefix && !strcmp(codec->component.name_prefix, "R")) {
+	if (codec->component.name_prefix &&
+		!strcmp(codec->component.name_prefix, "R")) {
 		snd_soc_dapm_ignore_suspend(dapm, "R SPK");
 		snd_soc_dapm_ignore_suspend(dapm, "R AMP Enable");
 		snd_soc_dapm_ignore_suspend(dapm, "R AMP Playback");
@@ -1186,14 +1208,13 @@ static int cs35l36_handle_of_data(struct i2c_client *i2c_client,
 	struct device_node *np = i2c_client->dev.of_node;
 	struct irq_cfg *irq_gpio_config = &pdata->irq_config;
 	struct device_node *irq_gpio;
-	int ret;
-	u32 val;
+	unsigned int val, ret;
 
 	if (!np)
 		return 0;
 
 	ret = of_property_read_u32(np, "cirrus,boost-ctl-millivolt", &val);
-	if (!ret) {
+	if (ret >= 0) {
 		if (val < 2550 || val > 12000) {
 			dev_err(&i2c_client->dev,
 				"Invalid Boost Voltage %d mV\n", val);
@@ -1207,7 +1228,7 @@ static int cs35l36_handle_of_data(struct i2c_client *i2c_client,
 		pdata->bst_vctl_sel = val | CS35L36_VALID_PDATA;
 
 	ret = of_property_read_u32(np, "cirrus,boost-peak-milliamp", &val);
-	if (!ret) {
+	if (ret >= 0) {
 		if (val < 1600 || val > 4500) {
 			dev_err(&i2c_client->dev,
 				"Invalid Boost Peak Current %u mA\n", val);
@@ -1293,6 +1314,7 @@ static int cs35l36_pac(struct cs35l36_private *cs35l36)
 {
 	int ret, count;
 	unsigned int val;
+
 	if (cs35l36->rev_id == CS35L36_REV_B0) {
 		/*
 		 * Magic code for internal PAC
@@ -1494,9 +1516,9 @@ static int cs35l36_i2c_probe(struct i2c_client *i2c_client,
 	} else {
 		pdata = devm_kzalloc(dev, sizeof(struct cs35l36_platform_data),
 					GFP_KERNEL);
-		if (!pdata) {
+		if (!pdata)
 			return -ENOMEM;
-		}
+
 		if (i2c_client->dev.of_node) {
 			ret = cs35l36_handle_of_data(i2c_client, pdata);
 			if (ret != 0)
@@ -1607,13 +1629,13 @@ static int cs35l36_i2c_probe(struct i2c_client *i2c_client,
 		irq_pol = cs35l36_irq_gpio_config(cs35l36);
 
 	if (pdata->irq_config.is_shared) {
-		ret = devm_request_threaded_irq(dev, i2c_client->irq, NULL, cs35l36_irq,
-				IRQF_ONESHOT | IRQF_SHARED | irq_pol,
-				"cs35l36", cs35l36);
+		ret = devm_request_threaded_irq(dev, i2c_client->irq, NULL,
+			cs35l36_irq, IRQF_ONESHOT | IRQF_SHARED | irq_pol,
+			"cs35l36", cs35l36);
 	} else {
-		ret = devm_request_threaded_irq(dev, i2c_client->irq, NULL, cs35l36_irq,
-				IRQF_ONESHOT | irq_pol,
-				"cs35l36", cs35l36);
+		ret = devm_request_threaded_irq(dev, i2c_client->irq, NULL,
+			cs35l36_irq, IRQF_ONESHOT | irq_pol,
+			"cs35l36", cs35l36);
 	}
 
 	if (ret != 0) {

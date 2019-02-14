@@ -654,7 +654,7 @@ static void cpe_notify_cmi_client(struct cpe_info *t_info, u8 *payload,
 	hdr = CMI_GET_HEADER(payload);
 	service = CMI_HDR_GET_SERVICE(hdr);
 
-	notif.event = CPE_SVC_CMI_MSG;
+	notif.event = (enum cmi_api_event)CPE_SVC_CMI_MSG;
 	notif.result = result;
 	notif.message = payload;
 
@@ -1170,7 +1170,7 @@ static enum cpe_process_result cpe_boot_complete(
 	}
 
 	pr_debug("%s: boot complete\n", __func__);
-	return CPE_SVC_SUCCESS;
+	return (enum cpe_process_result)CPE_SVC_SUCCESS;
 }
 
 static enum cpe_process_result cpe_process_send_msg(

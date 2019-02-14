@@ -322,6 +322,9 @@ static struct afe_param_id_group_device_tdm_cfg tdm_group_cfg = {
 	0xFF,
 };
 
+static struct afe_param_id_group_device_tdm_cfg
+	*tdm_group_cfgs[IDX_GROUP_TDM_MAX] = {NULL};
+
 static u32 num_tdm_group_ports;
 
 static struct afe_clk_set tdm_clk_set = {
@@ -332,6 +335,8 @@ static struct afe_clk_set tdm_clk_set = {
 	Q6AFE_LPASS_CLK_ROOT_DEFAULT,
 	0,
 };
+
+static struct afe_clk_set *tdm_clk_sets[IDX_GROUP_TDM_MAX] = {NULL};
 
 int msm_dai_q6_get_group_idx(u16 id)
 {
@@ -5468,6 +5473,26 @@ static int msm_dai_tdm_q6_probe(struct platform_device *pdev)
 	}
 	atomic_set(&tdm_group_ref[group_idx], 0);
 
+	/* store to the cache before tdm device probe */
+	tdm_group_cfgs[group_idx] = (struct afe_param_id_group_device_tdm_cfg *)
+		devm_kmalloc(&pdev->dev,
+			sizeof(struct afe_param_id_group_device_tdm_cfg),
+				GFP_KERNEL);
+	tdm_clk_sets[group_idx] = (struct afe_clk_set *)
+		devm_kmalloc(&pdev->dev,
+			sizeof(struct afe_clk_set), GFP_KERNEL);
+	if (tdm_group_cfgs[group_idx] == NULL ||
+			tdm_clk_sets[group_idx] == NULL) {
+		dev_err(&pdev->dev, "%s: failed to allocate config cache\n",
+			__func__);
+		rc = -ENOMEM;
+		goto rtn;
+	}
+	memcpy(tdm_group_cfgs[group_idx], &tdm_group_cfg,
+		sizeof(struct afe_param_id_group_device_tdm_cfg));
+	memcpy(tdm_clk_sets[group_idx], &tdm_clk_set,
+		sizeof(struct afe_clk_set));
+
 	/* probe child node info */
 	rc = of_platform_populate(pdev->dev.of_node, NULL, NULL, &pdev->dev);
 	if (rc) {
@@ -7068,7 +7093,8 @@ static int msm_dai_q6_tdm_prepare(struct snd_pcm_substream *substream,
 			 * if only one port, don't do group enable as there
 			 * is no group need for only one port
 			 */
-			if (dai_data->num_group_ports > 1) {
+			if ((dai_data->num_group_ports > 1) ||
+				(group_idx == IDX_GROUP_PRIMARY_TDM_TX)) {
 				rc = afe_port_group_enable(group_id,
 					&dai_data->group_cfg, true);
 				if (rc < 0) {
@@ -8784,6 +8810,7 @@ static int msm_dai_q6_tdm_dev_probe(struct platform_device *pdev)
 	int rc = 0;
 	u32 tdm_dev_id = 0;
 	int port_idx = 0;
+	int group_idx = 0;
 	struct device_node *tdm_parent_node = NULL;
 
 	/* retrieve device/afe id */
@@ -8950,13 +8977,24 @@ static int msm_dai_q6_tdm_dev_probe(struct platform_device *pdev)
 		/* proceed with probe */
 	}
 
+	group_idx = msm_dai_q6_get_group_idx(tdm_dev_id);
+
+	if (tdm_group_cfgs[group_idx] == NULL ||
+			tdm_clk_sets[group_idx] == NULL) {
+		dev_err(&pdev->dev, "%s: cache is null on tdm_dev_id 0x%x\n",
+			__func__, tdm_dev_id);
+		rc = -EINVAL;
+		goto free_dai_data;
+	}
+
 	/* copy static clk per parent node */
-	dai_data->clk_set = tdm_clk_set;
+	memcpy(&dai_data->clk_set, tdm_clk_sets[group_idx],
+		sizeof(struct afe_clk_set));
 	/* copy static group cfg per parent node */
-	dai_data->group_cfg.tdm_cfg = tdm_group_cfg;
+	memcpy(&dai_data->group_cfg.tdm_cfg, tdm_group_cfgs[group_idx],
+		sizeof(struct afe_param_id_group_device_tdm_cfg));
 	/* copy static num group ports per parent node */
 	dai_data->num_group_ports = num_tdm_group_ports;
-
 
 	dev_set_drvdata(&pdev->dev, dai_data);
 

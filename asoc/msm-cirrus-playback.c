@@ -576,6 +576,10 @@ int msm_routing_cirrus_fbport_put(struct snd_kcontrol *kcontrol,
 		cirrus_fb_port = AFE_PORT_ID_QUATERNARY_TDM_TX;
 		cirrus_ff_port = AFE_PORT_ID_QUATERNARY_TDM_RX;
 		break;
+	case 5:
+		cirrus_fb_port = AFE_PORT_ID_SECONDARY_TDM_TX;
+		cirrus_ff_port = AFE_PORT_ID_SECONDARY_TDM_RX;
+		break;
 	default:
 		/* Default port to QUATERNARY */
 		cirrus_fb_port_ctl = 4;
@@ -969,7 +973,7 @@ static int msm_routing_crus_fail_det_get(struct snd_kcontrol *kcontrol,
 
 static const char *cirrus_fb_port_text[] = {"PRI_MI2S_RX", "SEC_MI2S_RX",
 					    "TERT_MI2S_RX", "QUAT_MI2S_RX",
-					    "QUAT_TDM_RX_0"};
+					    "QUAT_TDM_RX_0", "SEC_TDM_RX_0"};
 
 static const char *crus_en_text[] = {"Config SP Disable", "Config SP Enable"};
 
@@ -980,7 +984,7 @@ static const char *crus_delta_text[] = {"Idle", "Load", "Run"};
 static const char *crus_chan_swap_text[] = {"LR", "RL"};
 
 static const struct soc_enum cirrus_fb_controls_enum[] = {
-	SOC_ENUM_SINGLE_EXT(5, cirrus_fb_port_text),
+	SOC_ENUM_SINGLE_EXT(6, cirrus_fb_port_text),
 };
 
 static const struct soc_enum crus_en_enum[] = {

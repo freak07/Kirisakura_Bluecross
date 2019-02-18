@@ -246,6 +246,7 @@
 #define RT5514_FIRMWARE1	"rt5514_dsp_fw1.bin"
 #define RT5514_FIRMWARE2	"rt5514_dsp_fw2.bin"
 #define RT5514_FIRMWARE3	"rt5514_dsp_fw3.bin"
+#define RT5514_FIRMWARE4	"rt5514_dsp_fw4.bin"
 
 #define BUFFER_SIZE 10
 
@@ -273,9 +274,9 @@ struct rt5514_priv {
 	int pll_src;
 	int pll_in;
 	int pll_out;
-	int dsp_enabled;
-	u8 *model_buf;
-	unsigned int model_len;
+	int dsp_enabled, dsp_test;
+	u8 *hotword_model_buf, *musdet_model_buf;
+	unsigned int hotword_model_len, musdet_model_len;
 	unsigned int pll3_cal_value;
 	int codec_state;
 };

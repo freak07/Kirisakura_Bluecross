@@ -1073,19 +1073,7 @@ int q6core_adsp_crash(void)
 
 	ret = wait_event_timeout(q6core_lcl.bus_bw_req_wait,
 				(q6core_lcl.bus_bw_resp_received == 1),
-				msecs_to_jiffies(TIMEOUT_MS));
-
-	if (!ret) {
-		pr_err("%s: wait_event timeout for crash ADSP\n",
-			__func__);
-		goto unlock;
-	}
-
-	if (q6core_lcl.adsp_status < 0) {
-		pr_info("%s: adsp_status is smaller than 0 (%d)\n",
-			__func__, q6core_lcl.adsp_status);
-		ret = q6core_lcl.adsp_status;
-	}
+				msecs_to_jiffies(TIMEOUT_MS*5));
 
 unlock:
 	mutex_unlock(&q6core_lcl.cmd_lock);

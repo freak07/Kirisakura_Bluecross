@@ -987,7 +987,7 @@ void dsi_display_esd_irq_mode_switch(struct dsi_display *display,
 		cancel_work_sync(&display->esd_irq_work);
 
 		/* Schedule ESD status check */
-		schedule_delayed_work(&conn->status_work,
+		queue_delayed_work(system_power_efficient_wq, &conn->status_work,
 				msecs_to_jiffies(STATUS_CHECK_INTERVAL_MS));
 		conn->esd_status_check = true;
 	}

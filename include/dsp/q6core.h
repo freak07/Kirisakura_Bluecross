@@ -165,10 +165,17 @@ struct avcs_cmd_deregister_topologies {
 	 */
 } __packed;
 
+#define AVCS_CMD_ADSP_CRASH        0x0001FFFF
+
+struct avcs_cmd_adsp_crash {
+	struct apr_hdr hdr;
+} __packed;
+
 #define AVCS_MODE_DEREGISTER_ALL_CUSTOM_TOPOLOGIES	2
 
 
 int32_t core_set_license(uint32_t key, uint32_t module_id);
 int32_t core_get_license_status(uint32_t module_id);
+int q6core_adsp_crash(void);
 
 #endif /* __Q6CORE_H__ */

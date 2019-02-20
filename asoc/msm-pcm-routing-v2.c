@@ -88,6 +88,7 @@ static bool is_custom_stereo_on;
 static bool is_ds2_on;
 static bool swap_ch;
 static int  flick_sensor_port = SLIMBUS_1_TX;
+static int adsp_ssr_switch_status;
 
 #define WEIGHT_0_DB 0x4000
 /* all the FEs which can support channel mixer */
@@ -2374,6 +2375,15 @@ static int msm_routing_get_tdm_switch_mixer(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static int adsp_ssr_trigger_status_get(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	ucontrol->value.integer.value[0] = adsp_ssr_switch_status;
+	pr_debug("%s: get value %ld\n", __func__,
+		ucontrol->value.integer.value[0]);
+	return 0;
+}
+
 static int msm_routing_sec_tdm_switch_mixer(struct snd_kcontrol *kcontrol,
 				struct snd_ctl_elem_value *ucontrol)
 {
@@ -2391,6 +2401,23 @@ static int msm_routing_sec_tdm_switch_mixer(struct snd_kcontrol *kcontrol,
 						0, update);
 	tdm_switch_enable = ucontrol->value.integer.value[0];
 	return 1;
+}
+
+static int adsp_ssr_trigger_status_put(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	int ret = 0;
+
+	adsp_ssr_switch_status = ucontrol->value.integer.value[0];
+	pr_debug("%s: put value %d\n", __func__, adsp_ssr_switch_status);
+
+	if (adsp_ssr_switch_status > 0) {
+		ret = q6core_adsp_crash();
+		pr_info("%s: trigger SSR ret %d\n", __func__, ret);
+	}
+
+	adsp_ssr_switch_status = 0;
+	return ret;
 }
 
 
@@ -11749,6 +11776,11 @@ static const struct snd_kcontrol_new sec_tdm_rx_switch_mixer_controls =
 	0, 1, 0, msm_routing_get_tdm_switch_mixer,
 	msm_routing_sec_tdm_switch_mixer);
 
+static const struct snd_kcontrol_new adsp_ssr_trigger_controls =
+	SOC_SINGLE_EXT("Switch", SND_SOC_NOPM,
+	0, 1, 0, adsp_ssr_trigger_status_get,
+	adsp_ssr_trigger_status_put);
+
 static const struct soc_enum lsm_port_enum =
 	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(lsm_port_text), lsm_port_text);
 
@@ -13548,6 +13580,9 @@ static const struct snd_soc_dapm_widget msm_qdsp6_widgets[] = {
 				&a2dp_slim7_switch_mixer_controls),
 	SND_SOC_DAPM_SWITCH("SEC_TDM_RX_DL_HL", SND_SOC_NOPM, 0, 0,
 				&sec_tdm_rx_switch_mixer_controls),
+
+	SND_SOC_DAPM_SWITCH("ADSP_SSR_TRIGGER", SND_SOC_NOPM, 0, 0,
+				&adsp_ssr_trigger_controls),
 
 	/* Mixer definitions */
 	SND_SOC_DAPM_MIXER("PRI_RX Audio Mixer", SND_SOC_NOPM, 0, 0,
@@ -15976,6 +16011,7 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"TERT_MI2S_RX_DL_HL", "Switch", "TERT_MI2S_DL_HL"},
 	{"TERT_MI2S_RX", NULL, "TERT_MI2S_RX_DL_HL"},
 
+	{"ADSP_SSR_TRIGGER", "Switch", "SEC_TDM_RX_0_DL_HL"},
 	{"SEC_TDM_RX_DL_HL", "Switch", "SEC_TDM_RX_0_DL_HL"},
 	{"SEC_TDM_RX_0", NULL, "SEC_TDM_RX_DL_HL"},
 

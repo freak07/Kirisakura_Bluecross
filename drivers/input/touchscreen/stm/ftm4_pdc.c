@@ -333,7 +333,7 @@ static ssize_t store_cmd(struct device *dev, struct device_attribute *devattr,
 			if (info->delayed_cmd_param[0] > 1)
 				info->delayed_cmd_param[1] = buf[19]-'0';
 
-			schedule_delayed_work(&info->cover_cmd_work,
+			queue_delayed_work(system_power_efficient_wq, &info->cover_cmd_work,
 					msecs_to_jiffies(10));
 		}
 		return -EBUSY;
@@ -350,7 +350,7 @@ static ssize_t store_cmd(struct device *dev, struct device_attribute *devattr,
 				info->delayed_cmd_param[1] = buf[19]-'0';
 
 			if (info->delayed_cmd_param[0] == 0)
-				schedule_delayed_work(&info->cover_cmd_work,
+				queue_delayed_work(system_power_efficient_wq, &info->cover_cmd_work,
 						msecs_to_jiffies(300));
 		}
 	}

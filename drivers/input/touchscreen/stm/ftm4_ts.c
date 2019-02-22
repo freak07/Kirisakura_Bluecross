@@ -492,7 +492,7 @@ int fts_wait_for_ready(struct fts_ts_info *info)
 					__func__);
 
 			if (info->lowpower_mode) {
-				schedule_delayed_work(&info->reset_work,
+				queue_delayed_work(system_power_efficient_wq, &info->reset_work,
 					msecs_to_jiffies(10));
 			}
 			break;
@@ -1808,7 +1808,7 @@ static int fts_input_open(struct input_dev *dev)
 	tsp_debug_info(&info->client->dev, "%s\n", __func__);
 
 #ifdef USE_OPEN_DWORK
-	schedule_delayed_work(&info->open_work,
+	queue_delayed_work(system_power_efficient_wq, &info->open_work,
 			      msecs_to_jiffies(TOUCH_OPEN_DWORK_TIME));
 #else
 	retval = fts_start_device(info);

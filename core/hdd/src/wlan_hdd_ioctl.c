@@ -6964,10 +6964,10 @@ static const struct hdd_drv_cmd hdd_drv_cmds[] = {
 	{"GETANTENNAMODE",            drv_cmd_get_antenna_mode, false},
 	/* Deprecated commands */
 	{"STOP",                      drv_cmd_dummy, false},
-	{"RXFILTER-START",            drv_cmd_dummy, false},
-	{"RXFILTER-STOP",             drv_cmd_dummy, false},
-	{"BTCOEXSCAN-START",          drv_cmd_dummy, false},
-	{"BTCOEXSCAN-STOP",           drv_cmd_dummy, false},
+        {"RXFILTER-START",            drv_cmd_dummy, false},
+        {"RXFILTER-STOP",             drv_cmd_dummy, false},
+        {"BTCOEXSCAN-START",          drv_cmd_dummy, false},
+        {"BTCOEXSCAN-STOP",           drv_cmd_dummy, false},
 };
 
 /**

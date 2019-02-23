@@ -404,10 +404,6 @@ static int __hdd_hostapd_stop(struct net_device *dev)
 	hdd_stop_adapter(hdd_ctx, adapter, true);
 
 	clear_bit(DEVICE_IFACE_OPENED, &adapter->event_flags);
-
-	if (!hdd_is_cli_iface_up(hdd_ctx))
-		sme_scan_flush_result(hdd_ctx->hHal);
-
 	/* Stop all tx queues */
 	hdd_info("Disabling queues");
 	wlan_hdd_netif_queue_control(adapter,
@@ -591,6 +587,7 @@ static int __hdd_hostapd_set_mac_address(struct net_device *dev, void *addr)
 	hdd_info("Changing MAC to " MAC_ADDRESS_STR " of interface %s ",
 		 MAC_ADDR_ARRAY(mac_addr.bytes),
 		 dev->name);
+	memcpy(&adapter->macAddressCurrent, psta_mac_addr->sa_data, ETH_ALEN);
 	memcpy(dev->dev_addr, psta_mac_addr->sa_data, ETH_ALEN);
 	EXIT();
 	return 0;
@@ -8192,10 +8189,8 @@ int wlan_hdd_cfg80211_start_bss(hdd_adapter_t *pHostapdAdapter,
 	pIe = wlan_hdd_get_wps_ie_ptr(pBeacon->tail, pBeacon->tail_len);
 
 	if (pIe) {
-		/* To acess pIe[15], length needs to be atlest 14 */
-		if (pIe[1] < 14) {
-			hdd_err("**Wps Ie Length(%hhu) is too small***",
-				pIe[1]);
+		if (pIe[1] < (2 + WPS_OUI_TYPE_SIZE)) {
+			hdd_err("**Wps Ie Length is too small***");
 			ret = -EINVAL;
 			goto error;
 		} else if (memcmp(&pIe[2], WPS_OUI_TYPE, WPS_OUI_TYPE_SIZE) ==

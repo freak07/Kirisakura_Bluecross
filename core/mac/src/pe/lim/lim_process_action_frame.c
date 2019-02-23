@@ -1959,6 +1959,7 @@ void lim_process_action_frame(tpAniSirGlobal mac_ctx,
 	break;
 	case SIR_MAC_ACTION_PUBLIC_USAGE:
 		mac_hdr = WMA_GET_RX_MAC_HEADER(rx_pkt_info);
+		frame_len = WMA_GET_RX_PAYLOAD_LEN(rx_pkt_info);
 		switch (action_hdr->actionID) {
 		case SIR_MAC_ACTION_EXT_CHANNEL_SWITCH_ID:
 			lim_process_ext_channel_switch_action_frame(mac_ctx,

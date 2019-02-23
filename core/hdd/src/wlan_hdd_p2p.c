@@ -1958,6 +1958,7 @@ static int __wlan_hdd_mgmt_tx(struct wiphy *wiphy, struct wireless_dev *wdev,
 	bool enb_random_mac = false;
 	uint32_t mgmt_hdr_len = sizeof(struct ieee80211_hdr_3addr);
 	int32_t mgmt_id;
+	QDF_STATUS qdf_status;
 
 	ENTER();
 
@@ -1990,6 +1991,22 @@ static int __wlan_hdd_mgmt_tx(struct wiphy *wiphy, struct wireless_dev *wdev,
 	hdd_debug("Device_mode %s(%d) type: %d, wait: %d, offchan: %d",
 		   hdd_device_mode_to_string(pAdapter->device_mode),
 		   pAdapter->device_mode, type, wait, offchan);
+
+	/*
+	 * When frame to be transmitted is auth mgmt, then trigger
+	 * sme_send_mgmt_tx to send auth frame
+	 */
+	if ((pAdapter->device_mode == QDF_STA_MODE) &&
+	    (type == SIR_MAC_MGMT_FRAME &&
+	    subType == SIR_MAC_MGMT_AUTH)) {
+		qdf_status = sme_send_mgmt_tx(WLAN_HDD_GET_HAL_CTX(pAdapter),
+					      pAdapter->sessionId, buf, len);
+
+		if (QDF_IS_STATUS_SUCCESS(qdf_status))
+			return 0;
+		else
+			return -EINVAL;
+	}
 
 	if (type == SIR_MAC_MGMT_FRAME && subType == SIR_MAC_MGMT_ACTION &&
 	    len > IEEE80211_MIN_ACTION_SIZE)
@@ -3268,8 +3285,8 @@ static inline bool is_public_action_frame(uint8_t *pb_frames,
 static inline bool is_p2p_action_frame(uint8_t *pb_frames,
 				       uint32_t frame_len)
 {
-	if (frame_len <= (WLAN_HDD_PUBLIC_ACTION_FRAME_OFFSET +
-	    SIR_MAC_P2P_OUI_SIZE + 2)) {
+	if (frame_len <= WLAN_HDD_PUBLIC_ACTION_FRAME_OFFSET +
+	    SIR_MAC_P2P_OUI_SIZE) {
 		hdd_debug("Not a p2p action frame len: %d", frame_len);
 		return false;
 	}

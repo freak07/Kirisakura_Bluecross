@@ -144,6 +144,20 @@ typedef struct {
 #define WLAN_AKM_SUITE_FT_FILS_SHA384 0x000FAC11
 #endif
 
+#ifndef WLAN_AKM_SUITE_OWE
+#define WLAN_AKM_SUITE_OWE 0x000FAC12
+#endif
+
+#define WLAN_AKM_SUITE_EAP_SHA256 0x000FAC0B
+#define WLAN_AKM_SUITE_EAP_SHA384 0x000FAC0C
+
+#ifndef WLAN_AKM_SUITE_SAE
+#define WLAN_AKM_SUITE_SAE 0x000FAC08
+#endif
+
+#ifndef WLAN_AKM_SUITE_DPP_RSN
+#define WLAN_AKM_SUITE_DPP_RSN 0x506F9A02
+#endif
 
 #ifdef FEATURE_WLAN_TDLS
 #define WLAN_IS_TDLS_SETUP_ACTION(action) \
@@ -253,6 +267,7 @@ typedef enum {
 /* Support Tx Power Limit setting */
 #define WIFI_FEATURE_SET_TX_POWER_LIMIT 0x4000000
 
+#define WIFI_FEATURE_P2P_RAND_MAC       0x80000000 /* Support P2P MAC randomization */
 
 /**
  * typedef struct sHddAvoidFreqRange - avoid frequency range

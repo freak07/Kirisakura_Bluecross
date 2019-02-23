@@ -104,6 +104,31 @@ uint8_t csr_rsn_oui[][CSR_RSN_OUI_SIZE] = {
 	{0x00, 0x0F, 0xAC, 0x08},
 	/* AES GCMP-256 */
 	{0x00, 0x0F, 0xAC, 0x09},
+#ifdef WLAN_FEATURE_OWE
+#define ENUM_OWE 15
+	/* OWE https://tools.ietf.org/html/rfc8110 */
+	{0x00, 0x0F, 0xAC, 0x12},
+#else
+	{0x00, 0x00, 0x00, 0x00},
+#endif
+#define ENUM_SUITEB_EAP256 16
+	{0x00, 0x0F, 0xAC, 0x0B},
+#define ENUM_SUITEB_EAP384 17
+	{0x00, 0x0F, 0xAC, 0x0C},
+#ifdef WLAN_FEATURE_SAE
+#define ENUM_SAE 18
+	/* SAE */
+	{0x00, 0x0F, 0xAC, 0x08},
+#define ENUM_FT_SAE 19
+	/* FT SAE */
+	{0x00, 0x0F, 0xAC, 0x09},
+#else
+	{0x00, 0x00, 0x00, 0x00},
+	{0x00, 0x00, 0x00, 0x00},
+#endif
+#define ENUM_DPP_RSN 20
+	/* DPP RSN */
+	{0x50, 0x6F, 0x9A, 0x02},
 	/* define new oui here, update #define CSR_OUI_***_INDEX  */
 };
 
@@ -118,6 +143,16 @@ uint8_t csr_wapi_oui[][CSR_WAPI_OUI_SIZE] = {
 #endif /* FEATURE_WLAN_WAPI */
 uint8_t csr_wme_info_oui[CSR_WME_OUI_SIZE] = { 0x00, 0x50, 0xf2, 0x02 };
 uint8_t csr_wme_parm_oui[CSR_WME_OUI_SIZE] = { 0x00, 0x50, 0xf2, 0x02 };
+
+uint8_t csr_group_mgmt_oui[][CSR_RSN_OUI_SIZE] = {
+#define ENUM_CMAC 0
+	{0x00, 0x0F, 0xAC, 0x06},
+#define ENUM_GMAC_128 1
+	{0x00, 0x0F, 0xAC, 0x0B},
+#define ENUM_GMAC_256 2
+	{0x00, 0x0F, 0xAC, 0x0C},
+};
+
 
 /* ////////////////////////////////////////////////////////////////////// */
 
@@ -261,6 +296,7 @@ const char *get_e_roam_cmd_status_str(eRoamCmdStatus val)
 		CASE_RETURN_STR(eCSR_ROAM_START);
 		CASE_RETURN_STR(eCSR_ROAM_ABORT);
 		CASE_RETURN_STR(eCSR_ROAM_NAPI_OFF);
+		CASE_RETURN_STR(eCSR_ROAM_SAE_COMPUTE);
 	default:
 		return "unknown";
 	}
@@ -1946,6 +1982,11 @@ bool csr_is_profile_rsn(tCsrRoamProfile *pProfile)
 	case eCSR_AUTH_TYPE_FILS_SHA384:
 	case eCSR_AUTH_TYPE_FT_FILS_SHA256:
 	case eCSR_AUTH_TYPE_FT_FILS_SHA384:
+	case eCSR_AUTH_TYPE_OWE:
+	case eCSR_AUTH_TYPE_SUITEB_EAP_SHA256:
+	case eCSR_AUTH_TYPE_SUITEB_EAP_SHA384:
+	case eCSR_AUTH_TYPE_SAE:
+	case eCSR_AUTH_TYPE_DPP_RSN:
 		fRSNProfile = true;
 		break;
 
@@ -2709,6 +2750,95 @@ static bool csr_is_auth_fils_ft_sha384(tpAniSirGlobal mac,
 }
 #endif
 
+#ifdef WLAN_FEATURE_OWE
+/*
+ * csr_is_auth_wpa_owe() - check whether oui is OWE
+ * @mac: Global MAC context
+ * @all_suites: pointer to all supported akm suites
+ * @suite_count: all supported akm suites count
+ * @oui: Oui needs to be matched
+ *
+ * Return: True if OUI is OWE, false otherwise
+ */
+static bool csr_is_auth_wpa_owe(tpAniSirGlobal mac,
+			       uint8_t all_suites[][CSR_RSN_OUI_SIZE],
+			       uint8_t suite_count, uint8_t oui[])
+{
+	return csr_is_oui_match
+		(mac, all_suites, suite_count, csr_rsn_oui[ENUM_OWE], oui);
+}
+#endif
+
+/*
+ * csr_is_auth_suiteb_eap_256() - check whether oui is SuiteB EAP256
+ * @mac: Global MAC context
+ * @all_suites: pointer to all supported akm suites
+ * @suite_count: all supported akm suites count
+ * @oui: Oui needs to be matched
+ *
+ * Return: True if OUI is SuiteB EAP256, false otherwise
+ */
+static bool csr_is_auth_suiteb_eap_256(tpAniSirGlobal mac,
+			       uint8_t all_suites[][CSR_RSN_OUI_SIZE],
+			       uint8_t suite_count, uint8_t oui[])
+{
+	return csr_is_oui_match(mac, all_suites, suite_count,
+				csr_rsn_oui[ENUM_SUITEB_EAP256], oui);
+}
+
+/*
+ * csr_is_auth_suiteb_eap_384() - check whether oui is SuiteB EAP384
+ * @mac: Global MAC context
+ * @all_suites: pointer to all supported akm suites
+ * @suite_count: all supported akm suites count
+ * @oui: Oui needs to be matched
+ *
+ * Return: True if OUI is SuiteB EAP384, false otherwise
+ */
+static bool csr_is_auth_suiteb_eap_384(tpAniSirGlobal mac,
+			       uint8_t all_suites[][CSR_RSN_OUI_SIZE],
+			       uint8_t suite_count, uint8_t oui[])
+{
+	return csr_is_oui_match(mac, all_suites, suite_count,
+				csr_rsn_oui[ENUM_SUITEB_EAP384], oui);
+}
+
+#ifdef WLAN_FEATURE_SAE
+/*
+ * csr_is_auth_wpa_sae() - check whether oui is SAE
+ * @mac: Global MAC context
+ * @all_suites: pointer to all supported akm suites
+ * @suite_count: all supported akm suites count
+ * @oui: Oui needs to be matched
+ *
+ * Return: True if OUI is SAE, false otherwise
+ */
+static bool csr_is_auth_wpa_sae(tpAniSirGlobal mac,
+			       uint8_t all_suites[][CSR_RSN_OUI_SIZE],
+			       uint8_t suite_count, uint8_t oui[])
+{
+	return csr_is_oui_match
+		(mac, all_suites, suite_count, csr_rsn_oui[ENUM_SAE], oui);
+}
+#endif
+
+/*
+ * csr_is_auth_dpp_rsn() - check whether oui is dpp rsn
+ * @mac: Global MAC context
+ * @all_suites: pointer to all supported akm suites
+ * @suite_count: all supported akm suites count
+ * @oui: Oui needs to be matched
+ *
+ * Return: True if OUI is dpp rsn, false otherwise
+ */
+static bool csr_is_auth_dpp_rsn(tpAniSirGlobal mac,
+				uint8_t all_suites[][CSR_RSN_OUI_SIZE],
+				uint8_t suite_count, uint8_t oui[])
+{
+	return csr_is_oui_match(mac, all_suites, suite_count,
+				csr_rsn_oui[ENUM_DPP_RSN], oui);
+}
+
 static bool csr_is_auth_wpa(tpAniSirGlobal pMac,
 			    uint8_t AllSuites[][CSR_WPA_OUI_SIZE],
 			    uint8_t cAllSuites, uint8_t Oui[])
@@ -2724,6 +2854,56 @@ static bool csr_is_auth_wpa_psk(tpAniSirGlobal pMac,
 	return csr_is_oui_match
 		(pMac, AllSuites, cAllSuites, csr_wpa_oui[02], Oui);
 }
+
+#ifdef WLAN_FEATURE_GMAC
+/*
+ * csr_is_group_mgmt_gmac_128() - check whether oui is GMAC_128
+ * @mac: Global MAC context
+ * @all_suites: pointer to all supported akm suites
+ * @suite_count: all supported akm suites count
+ * @oui: Oui needs to be matched
+ *
+ * Return: True if OUI is GMAC_128, false otherwise
+ */
+static bool csr_is_group_mgmt_gmac_128(tpAniSirGlobal mac,
+				uint8_t all_suites[][CSR_RSN_OUI_SIZE],
+				uint8_t suite_count, uint8_t oui[])
+{
+	return csr_is_oui_match(mac, all_suites, suite_count,
+				csr_group_mgmt_oui[ENUM_GMAC_128], oui);
+}
+
+/*
+ * csr_is_group_mgmt_gmac_256() - check whether oui is GMAC_256
+ * @mac: Global MAC context
+ * @all_suites: pointer to all supported akm suites
+ * @suite_count: all supported akm suites count
+ * @oui: Oui needs to be matched
+ *
+ * Return: True if OUI is GMAC_256, false otherwise
+ */
+static bool csr_is_group_mgmt_gmac_256(tpAniSirGlobal mac,
+				uint8_t all_suites[][CSR_RSN_OUI_SIZE],
+				uint8_t suite_count, uint8_t oui[])
+{
+	return csr_is_oui_match(mac, all_suites, suite_count,
+				csr_group_mgmt_oui[ENUM_GMAC_256], oui);
+}
+#else
+static bool csr_is_group_mgmt_gmac_128(tpAniSirGlobal mac,
+				uint8_t all_suites[][CSR_RSN_OUI_SIZE],
+				uint8_t suite_count, uint8_t oui[])
+{
+	return false;
+}
+
+static bool csr_is_group_mgmt_gmac_256(tpAniSirGlobal mac,
+				uint8_t all_suites[][CSR_RSN_OUI_SIZE],
+				uint8_t suite_count, uint8_t oui[])
+{
+	return false;
+}
+#endif
 
 static uint8_t csr_get_oui_index_from_cipher(eCsrEncryptionType enType)
 {
@@ -2825,6 +3005,78 @@ static void csr_is_fils_auth(tpAniSirGlobal mac_ctx,
 {
 }
 #endif
+
+#ifdef WLAN_FEATURE_OWE
+/**
+ * csr_check_n_set_owe_auth() - update negotiated auth if matches to OWE auth type
+ * @mac_ctx: pointer to mac context
+ * @authsuites: auth suites
+ * @c_auth_suites: auth suites count
+ * @authentication: authentication
+ * @auth_type: authentication type list
+ * @index: current counter
+ * @neg_authtype: pointer to negotiated auth
+ *
+ * Return: None
+ */
+static void csr_check_n_set_owe_auth(tpAniSirGlobal mac_ctx,
+	uint8_t authsuites[][CSR_RSN_OUI_SIZE], uint8_t c_auth_suites,
+	uint8_t authentication[], tCsrAuthList *auth_type,
+	uint8_t index, eCsrAuthType *neg_authtype)
+{
+	if ((*neg_authtype == eCSR_AUTH_TYPE_UNKNOWN) &&
+	    csr_is_auth_wpa_owe(mac_ctx, authsuites,
+	    c_auth_suites, authentication)) {
+		if (eCSR_AUTH_TYPE_OWE == auth_type->authType[index])
+			*neg_authtype = eCSR_AUTH_TYPE_OWE;
+	}
+
+	sme_debug("negotiated auth type is %d", *neg_authtype);
+}
+#else
+static void csr_check_n_set_owe_auth(tpAniSirGlobal mac_ctx,
+	uint8_t authsuites[][CSR_RSN_OUI_SIZE], uint8_t c_auth_suites,
+	uint8_t authentication[], tCsrAuthList *auth_type,
+	uint8_t index, eCsrAuthType *neg_authtype)
+{
+}
+#endif
+
+#ifdef WLAN_FEATURE_SAE
+/**
+ * csr_check_sae_auth() - update negotiated auth if matches to SAE auth type
+ * @mac_ctx: pointer to mac context
+ * @authsuites: auth suites
+ * @c_auth_suites: auth suites count
+ * @authentication: authentication
+ * @auth_type: authentication type list
+ * @index: current counter
+ * @neg_authtype: pointer to negotiated auth
+ *
+ * Return: None
+ */
+static void csr_check_sae_auth(tpAniSirGlobal mac_ctx,
+	uint8_t authsuites[][CSR_RSN_OUI_SIZE], uint8_t c_auth_suites,
+	uint8_t authentication[], tCsrAuthList *auth_type,
+	uint8_t index, eCsrAuthType *neg_authtype)
+{
+	if ((*neg_authtype == eCSR_AUTH_TYPE_UNKNOWN) &&
+	   csr_is_auth_wpa_sae(mac_ctx, authsuites,
+	   c_auth_suites, authentication)) {
+		if (eCSR_AUTH_TYPE_SAE == auth_type->authType[index])
+			*neg_authtype = eCSR_AUTH_TYPE_SAE;
+	}
+	sme_debug("negotiated auth type is %d", *neg_authtype);
+}
+#else
+static void csr_check_sae_auth(tpAniSirGlobal mac_ctx,
+	uint8_t authsuites[][CSR_RSN_OUI_SIZE], uint8_t c_auth_suites,
+	uint8_t authentication[], tCsrAuthList *auth_type,
+	uint8_t index, eCsrAuthType *neg_authtype)
+{
+}
+#endif
+
 /**
  * csr_get_rsn_information() - to get RSN infomation
  * @hal: pointer to HAL
@@ -2838,6 +3090,8 @@ static void csr_is_fils_auth(tpAniSirGlobal mac_ctx,
  * @capabilities: RSN capabilities
  * @negotiated_authtype: Negotiated auth type
  * @negotiated_mccipher: negotiated multicast cipher
+ * @gp_mgmt_cipher: group management cipher
+ * @mgmt_encryption_type: group management encryption type
  *
  * This routine will get all RSN information
  *
@@ -2850,18 +3104,24 @@ static bool csr_get_rsn_information(tHalHandle hal, tCsrAuthList *auth_type,
 				    uint8_t *mcast_cipher, uint8_t *auth_suite,
 				    tCsrRSNCapabilities *capabilities,
 				    eCsrAuthType *negotiated_authtype,
-				    eCsrEncryptionType *negotiated_mccipher)
+				    eCsrEncryptionType *negotiated_mccipher,
+				    uint8_t *gp_mgmt_cipher,
+				    tAniEdType *mgmt_encryption_type)
 {
 	tpAniSirGlobal mac_ctx = PMAC_STRUCT(hal);
 	bool acceptable_cipher = false;
+	bool group_mgmt_acceptable_cipher = false;
 	uint8_t c_ucast_cipher = 0;
 	uint8_t c_mcast_cipher = 0;
+	uint8_t c_group_mgmt_cipher = 0;
 	uint8_t c_auth_suites = 0, i;
 	uint8_t unicast[CSR_RSN_OUI_SIZE];
 	uint8_t multicast[CSR_RSN_OUI_SIZE];
+	uint8_t group_mgmt[CSR_RSN_OUI_SIZE];
 	uint8_t authsuites[CSR_RSN_MAX_AUTH_SUITES][CSR_RSN_OUI_SIZE];
 	uint8_t authentication[CSR_RSN_OUI_SIZE];
 	uint8_t mccipher_arr[CSR_RSN_MAX_MULTICAST_CYPHERS][CSR_RSN_OUI_SIZE];
+	uint8_t group_mgmt_arr[CSR_RSN_MAX_MULTICAST_CYPHERS][CSR_RSN_OUI_SIZE];
 	eCsrAuthType neg_authtype = eCSR_AUTH_TYPE_UNKNOWN;
 
 	if (!rsn_ie->present)
@@ -2903,6 +3163,28 @@ static bool csr_get_rsn_information(tHalHandle hal, tCsrAuthList *auth_type,
 	if (negotiated_mccipher)
 		*negotiated_mccipher = mc_encryption->encryptionType[i];
 
+	/* Group Management Cipher only for 11w */
+	if (mgmt_encryption_type) {
+		c_group_mgmt_cipher++;
+		qdf_mem_copy(group_mgmt_arr, rsn_ie->gp_mgmt_cipher_suite,
+						CSR_RSN_OUI_SIZE);
+		if (csr_is_group_mgmt_gmac_128(mac_ctx, group_mgmt_arr,
+			  c_group_mgmt_cipher, group_mgmt)) {
+			group_mgmt_acceptable_cipher = true;
+			*mgmt_encryption_type = eSIR_ED_AES_GMAC_128;
+		} else if (csr_is_group_mgmt_gmac_256(mac_ctx, group_mgmt_arr,
+			  c_group_mgmt_cipher, group_mgmt)) {
+			group_mgmt_acceptable_cipher = true;
+			*mgmt_encryption_type = eSIR_ED_AES_GMAC_256;
+		} else {
+			/* Default is CMAC */
+			group_mgmt_acceptable_cipher = true;
+			*mgmt_encryption_type = eSIR_ED_AES_128_CMAC;
+			qdf_mem_copy(group_mgmt, csr_group_mgmt_oui[ENUM_CMAC],
+						CSR_RSN_OUI_SIZE);
+		}
+	}
+
 	/* Initializing with false as it has true value already */
 	acceptable_cipher = false;
 	for (i = 0; i < auth_type->numEntries; i++) {
@@ -2914,6 +3196,15 @@ static bool csr_get_rsn_information(tHalHandle hal, tCsrAuthList *auth_type,
 		csr_is_fils_auth(mac_ctx, authsuites, c_auth_suites,
 			authentication, auth_type, i, &neg_authtype);
 		/* Changed the AKM suites according to order of preference */
+		csr_check_sae_auth(mac_ctx, authsuites, c_auth_suites,
+			authentication, auth_type, i, &neg_authtype);
+
+		if ((neg_authtype == eCSR_AUTH_TYPE_UNKNOWN) &&
+		    csr_is_auth_dpp_rsn(mac_ctx, authsuites,
+					c_auth_suites, authentication)) {
+			if (eCSR_AUTH_TYPE_DPP_RSN == auth_type->authType[i])
+				neg_authtype = eCSR_AUTH_TYPE_DPP_RSN;
+		}
 		if ((neg_authtype == eCSR_AUTH_TYPE_UNKNOWN) &&
 				csr_is_ft_auth_rsn(mac_ctx, authsuites,
 					c_auth_suites, authentication)) {
@@ -2964,6 +3255,23 @@ static bool csr_get_rsn_information(tHalHandle hal, tCsrAuthList *auth_type,
 				neg_authtype = eCSR_AUTH_TYPE_RSN_8021X_SHA256;
 		}
 #endif
+		csr_check_n_set_owe_auth(mac_ctx, authsuites, c_auth_suites,
+			authentication, auth_type, i, &neg_authtype);
+
+		if ((neg_authtype == eCSR_AUTH_TYPE_UNKNOWN) &&
+		   csr_is_auth_suiteb_eap_256(mac_ctx, authsuites,
+		   c_auth_suites, authentication)) {
+			if (eCSR_AUTH_TYPE_SUITEB_EAP_SHA256 ==
+						auth_type->authType[i])
+				neg_authtype = eCSR_AUTH_TYPE_SUITEB_EAP_SHA256;
+		}
+		if ((neg_authtype == eCSR_AUTH_TYPE_UNKNOWN) &&
+		   csr_is_auth_suiteb_eap_384(mac_ctx, authsuites,
+		   c_auth_suites, authentication)) {
+			if (eCSR_AUTH_TYPE_SUITEB_EAP_SHA384 ==
+						auth_type->authType[i])
+				neg_authtype = eCSR_AUTH_TYPE_SUITEB_EAP_SHA384;
+		}
 
 		/*
 		 * The 1st auth type in the APs RSN IE, to match stations
@@ -2984,6 +3292,10 @@ end:
 
 		if (ucast_cipher)
 			qdf_mem_copy(ucast_cipher, unicast, CSR_RSN_OUI_SIZE);
+
+		if (gp_mgmt_cipher && group_mgmt_acceptable_cipher)
+			qdf_mem_copy(gp_mgmt_cipher, group_mgmt,
+				     CSR_RSN_OUI_SIZE);
 
 		if (auth_suite)
 			qdf_mem_copy(auth_suite, authentication,
@@ -3113,7 +3425,7 @@ static bool csr_is_rsn_match(tHalHandle hHal, tCsrAuthList *pAuthType,
 					pEnMcType, &pIes->RSN,
 					NULL, NULL, NULL, NULL,
 					pNegotiatedAuthType,
-					pNegotiatedMCCipher);
+					pNegotiatedMCCipher, NULL, NULL);
 #ifdef WLAN_FEATURE_11W
 	/* If all the filter matches then finally checks for PMF capabilities */
 	if (fRSNMatch)
@@ -3166,16 +3478,7 @@ static bool csr_lookup_pmkid_using_ssid(tpAniSirGlobal mac,
 	return false;
 }
 
-/**
- * csr_lookup_pmkid_using_bssid() - lookup pmkid using bssid
- * @mac: pointer to mac
- * @session: sme session pointer
- * @pmk_cache: pointer to pmk cache
- * @index: index value needs to be seached
- *
- * Return: true if pmkid is found else false
- */
-static bool csr_lookup_pmkid_using_bssid(tpAniSirGlobal mac,
+bool csr_lookup_pmkid_using_bssid(tpAniSirGlobal mac,
 					tCsrRoamSession *session,
 					tPmkidCacheInfo *pmk_cache,
 					uint32_t *index)
@@ -3332,6 +3635,7 @@ uint8_t csr_construct_rsn_ie(tHalHandle hHal, uint32_t sessionId,
 	uint8_t cbRSNIe = 0;
 	uint8_t UnicastCypher[CSR_RSN_OUI_SIZE];
 	uint8_t MulticastCypher[CSR_RSN_OUI_SIZE];
+	uint8_t gp_mgmt_cipher_suite[CSR_RSN_OUI_SIZE];
 	uint8_t AuthSuite[CSR_RSN_OUI_SIZE];
 	tCsrRSNAuthIe *pAuthSuite;
 	tCsrRSNCapabilities RSNCapabilities;
@@ -3383,7 +3687,9 @@ uint8_t csr_construct_rsn_ie(tHalHandle hHal, uint32_t sessionId,
 						&pProfile->mcEncryptionType,
 						&pIesLocal->RSN, UnicastCypher,
 						MulticastCypher, AuthSuite,
-					&RSNCapabilities, &negAuthType, NULL);
+					&RSNCapabilities, &negAuthType, NULL,
+					gp_mgmt_cipher_suite,
+					&pProfile->mgmt_encryption_type);
 		if (!fRSNMatch)
 			break;
 
@@ -3460,8 +3766,8 @@ uint8_t csr_construct_rsn_ie(tHalHandle hHal, uint32_t sessionId,
 			pGroupMgmtCipherSuite =
 				(uint8_t *) pPMK + sizeof(uint16_t) +
 				(pPMK->cPMKIDs * CSR_RSN_PMKID_SIZE);
-			qdf_mem_copy(pGroupMgmtCipherSuite, csr_rsn_oui[07],
-				     CSR_WPA_OUI_SIZE);
+			qdf_mem_copy(pGroupMgmtCipherSuite,
+				gp_mgmt_cipher_suite, CSR_RSN_OUI_SIZE);
 		}
 #endif
 
@@ -4265,7 +4571,12 @@ tAniEdType csr_translate_encrypt_type_to_ed_type(eCsrEncryptionType EncryptType)
 	case eCSR_ENCRYPT_TYPE_AES_GCMP_256:
 		edType = eSIR_ED_GCMP_256;
 		break;
-
+	case eCSR_ENCRYPT_TYPE_AES_GMAC_128:
+		edType = eSIR_ED_AES_GMAC_128;
+		break;
+	case eCSR_ENCRYPT_TYPE_AES_GMAC_256:
+		edType = eSIR_ED_AES_GMAC_256;
+		break;
 #endif
 	}
 

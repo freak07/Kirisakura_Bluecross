@@ -178,11 +178,6 @@
  */
 #define WLAN_DEAUTH_DPTRACE_DUMP_COUNT 100
 
-/*
- * Count to ratelimit the HDD logs during NL parsing
- */
-#define HDD_NL_ERR_RATE_LIMIT 5
-
 static const u32 hdd_gcmp_cipher_suits[] = {
 	WLAN_CIPHER_SUITE_GCMP,
 	WLAN_CIPHER_SUITE_GCMP_256,
@@ -206,6 +201,11 @@ static const u32 hdd_cipher_suites[] = {
 #endif
 #ifdef WLAN_FEATURE_11W
 	WLAN_CIPHER_SUITE_AES_CMAC,
+#if defined(WLAN_FEATURE_GMAC) && \
+		(LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0))
+	WLAN_CIPHER_SUITE_BIP_GMAC_128,
+	WLAN_CIPHER_SUITE_BIP_GMAC_256,
+#endif
 #endif
 };
 
@@ -349,7 +349,8 @@ static const struct ieee80211_txrx_stypes
 	[NL80211_IFTYPE_STATION] = {
 		.tx = 0xffff,
 		.rx = BIT(SIR_MAC_MGMT_ACTION) |
-		      BIT(SIR_MAC_MGMT_PROBE_REQ),
+		      BIT(SIR_MAC_MGMT_PROBE_REQ) |
+		      BIT(SIR_MAC_MGMT_AUTH),
 	},
 	[NL80211_IFTYPE_AP] = {
 		.tx = 0xffff,
@@ -2200,6 +2201,8 @@ __wlan_hdd_cfg80211_get_supported_features(struct wiphy *wiphy,
 
 	if (hdd_scan_random_mac_addr_supported())
 		fset |= WIFI_FEATURE_SCAN_RAND;
+
+	fset |= WIFI_FEATURE_P2P_RAND_MAC;
 
 	skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, sizeof(fset) +
 						  NLMSG_HDRLEN);
@@ -5768,12 +5771,6 @@ __wlan_hdd_cfg80211_wifi_configuration_set(struct wiphy *wiphy,
 		override_li = nla_get_u32(
 			tb[QCA_WLAN_VENDOR_ATTR_CONFIG_LISTEN_INTERVAL]);
 
-		if (override_li > CFG_ENABLE_DYNAMIC_DTIM_MAX) {
-			hdd_err_ratelimited(HDD_NL_ERR_RATE_LIMIT,
-				"Invalid value for listen interval - %d",
-				override_li);
-			return -EINVAL;
-		}
 		status = sme_override_listen_interval(hdd_ctx->hHal,
 						      adapter->sessionId,
 						      override_li);
@@ -6398,7 +6395,7 @@ static int __wlan_hdd_cfg80211_wifi_logger_start(struct wiphy *wiphy,
 	QDF_STATUS status;
 	hdd_context_t *hdd_ctx = wiphy_priv(wiphy);
 	struct nlattr *tb[QCA_WLAN_VENDOR_ATTR_WIFI_LOGGER_START_MAX + 1];
-	struct sir_wifi_start_log start_log = { 0 };
+	struct sir_wifi_start_log start_log;
 
 	ENTER_DEV(wdev->netdev);
 
@@ -6449,8 +6446,6 @@ static int __wlan_hdd_cfg80211_wifi_logger_start(struct wiphy *wiphy,
 	start_log.is_iwpriv_command = nla_get_u32(
 			tb[QCA_WLAN_VENDOR_ATTR_WIFI_LOGGER_FLAGS]);
 	hdd_debug("is_iwpriv_command =%d", start_log.is_iwpriv_command);
-
-	start_log.user_triggered = 1;
 
 	/* size is buff size which can be set using iwpriv command*/
 	start_log.size = 0;
@@ -13584,6 +13579,31 @@ static void wlan_hdd_cfg80211_set_wiphy_scan_flags(struct wiphy *wiphy)
 {
 }
 #endif
+
+#if defined(WLAN_FEATURE_SAE) && \
+	defined(CFG80211_EXTERNAL_AUTH_SUPPORT)
+/**
+ * wlan_hdd_cfg80211_set_wiphy_sae_feature() - Indicates support of SAE feature
+ * @wiphy: Pointer to wiphy
+ * @config: pointer to config
+ *
+ * This function is used to indicate the support of SAE
+ *
+ * Return: None
+ */
+static void wlan_hdd_cfg80211_set_wiphy_sae_feature(struct wiphy *wiphy,
+			struct hdd_config *config)
+{
+	if (config->is_sae_enabled)
+		wiphy->features |= NL80211_FEATURE_SAE;
+}
+#else
+static void wlan_hdd_cfg80211_set_wiphy_sae_feature(struct wiphy *wiphy,
+			struct hdd_config *config)
+{
+}
+#endif
+
 /*
  * FUNCTION: wlan_hdd_cfg80211_init
  * This function is called by hdd_wlan_startup()
@@ -13649,6 +13669,8 @@ int wlan_hdd_cfg80211_init(struct device *dev,
 #endif
 	if (pCfg->is_fils_enabled)
 		wlan_hdd_cfg80211_set_wiphy_fils_feature(wiphy);
+
+	wlan_hdd_cfg80211_set_wiphy_sae_feature(wiphy, pCfg);
 
 	wlan_hdd_cfg80211_set_wiphy_scan_flags(wiphy);
 
@@ -15360,6 +15382,15 @@ static int __wlan_hdd_cfg80211_add_key(struct wiphy *wiphy,
 	case WLAN_CIPHER_SUITE_AES_CMAC:
 		setKey.encType = eCSR_ENCRYPT_TYPE_AES_CMAC;
 		break;
+#if defined(WLAN_FEATURE_GMAC) && \
+		(LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0))
+	case WLAN_CIPHER_SUITE_BIP_GMAC_128:
+		setKey.encType = eCSR_ENCRYPT_TYPE_AES_GMAC_128;
+		break;
+	case WLAN_CIPHER_SUITE_BIP_GMAC_256:
+		setKey.encType = eCSR_ENCRYPT_TYPE_AES_GMAC_256;
+		break;
+#endif
 #endif
 	case WLAN_CIPHER_SUITE_GCMP:
 		setKey.encType = eCSR_ENCRYPT_TYPE_AES_GCMP;
@@ -17092,6 +17123,12 @@ static int wlan_hdd_cfg80211_set_auth_type(hdd_adapter_t *pAdapter,
 		hdd_debug("set authentication type to FILS SHARED");
 		pHddStaCtx->conn_info.authType = eCSR_AUTH_TYPE_OPEN_SYSTEM;
 		break;
+
+	case NL80211_AUTHTYPE_SAE:
+		hdd_debug("set authentication type to SAE");
+		pHddStaCtx->conn_info.authType = eCSR_AUTH_TYPE_SAE;
+		break;
+
 #endif
 	default:
 		hdd_err("Unsupported authentication type: %d", auth_type);
@@ -17370,6 +17407,7 @@ static int wlan_hdd_set_akm_suite(hdd_adapter_t *pAdapter, u32 key_mgmt)
 	case WLAN_AKM_SUITE_PSK:
 	case WLAN_AKM_SUITE_PSK_SHA256:
 	case WLAN_AKM_SUITE_FT_PSK:
+	case WLAN_AKM_SUITE_DPP_RSN:
 		hdd_debug("setting key mgmt type to PSK");
 		pWextState->authKeyMgmt |= IW_AUTH_KEY_MGMT_PSK;
 		break;
@@ -17426,6 +17464,29 @@ static int wlan_hdd_set_akm_suite(hdd_adapter_t *pAdapter, u32 key_mgmt)
 			eCSR_AUTH_TYPE_FT_FILS_SHA384;
 		break;
 #endif
+
+#ifdef WLAN_FEATURE_OWE
+	case WLAN_AKM_SUITE_OWE:
+		hdd_debug("setting key mgmt type to OWE");
+		pWextState->authKeyMgmt |= IW_AUTH_KEY_MGMT_802_1X;
+		break;
+#endif
+
+	case WLAN_AKM_SUITE_EAP_SHA256:
+		hdd_debug("setting key mgmt type to EAP_SHA256");
+		pWextState->authKeyMgmt |= IW_AUTH_KEY_MGMT_802_1X;
+		break;
+
+	case WLAN_AKM_SUITE_EAP_SHA384:
+		hdd_debug("setting key mgmt type to EAP_SHA384");
+		pWextState->authKeyMgmt |= IW_AUTH_KEY_MGMT_802_1X;
+		break;
+
+	case WLAN_AKM_SUITE_SAE:
+		hdd_debug("setting key mgmt type to SAE");
+		pWextState->authKeyMgmt |= IW_AUTH_KEY_MGMT_802_1X;
+		break;
+
 	default:
 		hdd_err("Unsupported key mgmt type: %d", key_mgmt);
 		return -EINVAL;
@@ -17867,30 +17928,16 @@ static int wlan_hdd_cfg80211_set_ie(hdd_adapter_t *pAdapter, const uint8_t *ie,
 			/* Setting WAPI Mode to ON=1 */
 			pAdapter->wapi_info.nWapiMode = 1;
 			hdd_debug("WAPI MODE IS %u", pAdapter->wapi_info.nWapiMode);
-			/* genie is pointing to data field of WAPI IE's buffer */
-			tmp = (uint8_t *)genie;
-			/* Validate length for Version(2 bytes) and Number
-			 * of AKM suite (2 bytes) in WAPI IE buffer, coming from
-			 * supplicant*/
-			if (eLen < 4) {
-				hdd_err("Invalid IE Len: %u", eLen);
-				return -EINVAL;
-			}
-			tmp = tmp + 2;  /* Skip Version */
+			tmp = (uint8_t *)ie;
+			tmp = tmp + 4;  /* Skip element Id and Len, Version */
 			/* Get the number of AKM suite */
 			akmsuiteCount = WPA_GET_LE16(tmp);
 			/* Skip the number of AKM suite */
 			tmp = tmp + 2;
-			/* Validate total length for WAPI IE's buffer */
-			if (eLen < (4 + (akmsuiteCount * sizeof(uint32_t)))) {
-				hdd_err("Invalid IE Len: %u", eLen);
-				return -EINVAL;
-			}
 			/* AKM suite list, each OUI contains 4 bytes */
 			akmlist = (uint32_t *)(tmp);
 			if (akmsuiteCount <= MAX_NUM_AKM_SUITES) {
-				qdf_mem_copy(akmsuite, akmlist,
-					     sizeof(uint32_t) * akmsuiteCount);
+				memcpy(akmsuite, akmlist, akmsuiteCount);
 			} else {
 				hdd_err("Invalid akmSuite count: %u",
 					akmsuiteCount);
@@ -17928,6 +17975,15 @@ static int wlan_hdd_cfg80211_set_ie(hdd_adapter_t *pAdapter, const uint8_t *ie,
 							roamProfile,
 							genie - 2, eLen + 2,
 							true);
+					status = wlan_hdd_add_assoc_ie(
+							pWextState, genie - 2,
+							eLen + 2);
+					if (status)
+						return status;
+				} else if (genie[0] ==
+					   SIR_DH_PARAMETER_ELEMENT_EXT_EID) {
+					hdd_debug("Set DH EXT IE(len %d)",
+							eLen + 2);
 					status = wlan_hdd_add_assoc_ie(
 							pWextState, genie - 2,
 							eLen + 2);
@@ -21263,6 +21319,68 @@ static int wlan_hdd_cfg80211_update_connect_params(struct wiphy *wiphy,
 }
 #endif
 
+#if defined(WLAN_FEATURE_SAE) && \
+	defined(CFG80211_EXTERNAL_AUTH_SUPPORT)
+/**
+ * __wlan_hdd_cfg80211_external_auth() - Handle external auth
+ * @wiphy: Pointer to wireless phy
+ * @dev: net device
+ * @params: Pointer to external auth params
+ *
+ * Return: 0 on success, negative errno on failure
+ */
+static int
+__wlan_hdd_cfg80211_external_auth(struct wiphy *wiphy,
+				  struct net_device *dev,
+				  struct cfg80211_external_auth_params *params)
+{
+	hdd_adapter_t *adapter = WLAN_HDD_GET_PRIV_PTR(dev);
+	hdd_context_t *hdd_ctx = wiphy_priv(wiphy);
+	int ret;
+
+	if (hdd_get_conparam() == QDF_GLOBAL_FTM_MODE) {
+		hdd_err("Command not allowed in FTM mode");
+		return -EPERM;
+	}
+
+	if (wlan_hdd_validate_session_id(adapter->sessionId)) {
+		hdd_err("invalid session id: %d", adapter->sessionId);
+		return -EINVAL;
+	}
+
+	ret = wlan_hdd_validate_context(hdd_ctx);
+	if (ret)
+		return ret;
+
+	hdd_debug("external_auth status: %d", params->status);
+	sme_handle_sae_msg(hdd_ctx->hHal, adapter->sessionId, params->status);
+
+	return ret;
+}
+
+/**
+ * wlan_hdd_cfg80211_external_auth() - Handle external auth
+ * @wiphy: Pointer to wireless phy
+ * @dev: net device
+ * @params: Pointer to external auth params
+ *
+ * Return: 0 on success, negative errno on failure
+ */
+static int
+wlan_hdd_cfg80211_external_auth(struct wiphy *wiphy,
+				struct net_device *dev,
+				struct cfg80211_external_auth_params *params)
+{
+	int ret;
+
+	cds_ssr_protect(__func__);
+	ret = __wlan_hdd_cfg80211_external_auth(wiphy, dev, params);
+	cds_ssr_unprotect(__func__);
+
+	return ret;
+}
+#endif
+
 /**
  * wlan_hdd_chan_info_cb() - channel info callback
  * @chan_info: struct scan_chan_info
@@ -21521,5 +21639,9 @@ static struct cfg80211_ops wlan_hdd_cfg80211_ops = {
 	(defined(CFG80211_UPDATE_CONNECT_PARAMS) ||\
 		(LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0)))
 	.update_connect_params = wlan_hdd_cfg80211_update_connect_params,
+#endif
+#if defined(WLAN_FEATURE_SAE) && \
+	defined(CFG80211_EXTERNAL_AUTH_SUPPORT)
+	.external_auth = wlan_hdd_cfg80211_external_auth,
 #endif
 };

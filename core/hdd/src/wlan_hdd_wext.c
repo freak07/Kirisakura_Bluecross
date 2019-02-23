@@ -3435,6 +3435,7 @@ static bool hdd_is_auth_type_rsn(eCsrAuthType authType)
 	case eCSR_AUTH_TYPE_RSN_PSK_SHA256:
 	case eCSR_AUTH_TYPE_RSN_8021X_SHA256:
 #endif
+	case eCSR_AUTH_TYPE_DPP_RSN:
 		rsnType = true;
 		break;
 	/* case eCSR_AUTH_TYPE_FAILED: */
@@ -4401,8 +4402,8 @@ static int __iw_get_name(struct net_device *dev,
  * Return: 0 on success, error number otherwise
  */
 static int iw_get_name(struct net_device *dev,
-		       struct iw_request_info *info,
-		       union iwreq_data *wrqu, char *extra)
+			 struct iw_request_info *info,
+			 union iwreq_data *wrqu, char *extra)
 {
 	int ret;
 

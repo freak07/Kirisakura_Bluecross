@@ -12862,6 +12862,29 @@ enum hw_filter_mode {
 
 /*
  * <ini>
+ * sae_enabled - Enable/Disable SAE support in driver
+ * @Min: 0
+ * @Max: 1
+ * @Default: 0
+ *
+ * This ini is used to enable/disable SAE support in driver
+ * Driver will update config to supplicant based on this config.
+ *
+ * Related: None
+ *
+ * Supported Feature: SAE
+ * Usage: External
+ *
+ * </ini>
+ */
+
+#define CFG_IS_SAE_ENABLED_NAME    "sae_enabled"
+#define CFG_IS_SAE_ENABLED_DEFAULT (1)
+#define CFG_IS_SAE_ENABLED_MIN     (0)
+#define CFG_IS_SAE_ENABLED_MAX     (1)
+
+/*
+ * <ini>
  * chan_width_weightage - Channel Width Weightage to calculate best candidate
  * @Min: 0
  * @Max: 100
@@ -14080,7 +14103,7 @@ enum hw_filter_mode {
 #define CFG_ENABLE_GCMP_NAME    "gcmp_enabled"
 #define CFG_ENABLE_GCMP_MIN     (0)
 #define CFG_ENABLE_GCMP_MAX     (1)
-#define CFG_ENABLE_GCMP_DEFAULT (0)
+#define CFG_ENABLE_GCMP_DEFAULT (1)
 
 /*
  * <ini>
@@ -15277,6 +15300,9 @@ struct hdd_config {
 	bool enable_rtt_mac_randomization;
 	uint32_t enable_secondary_rate;
 	bool is_unit_test_framework_enabled;
+#ifdef WLAN_FEATURE_SAE
+	bool is_sae_enabled;
+#endif
 };
 
 #define VAR_OFFSET(_Struct, _Var) (offsetof(_Struct, _Var))

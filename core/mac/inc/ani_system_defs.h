@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -68,13 +68,14 @@ typedef enum eAniAuthType {
 	eSIR_OPEN_SYSTEM,
 	eSIR_SHARED_KEY,
 	eSIR_FT_AUTH,
+	eSIR_AUTH_TYPE_SAE = 3,
 #if defined FEATURE_WLAN_ESE
 	eSIR_LEAP_AUTH = 0x80,
 #endif
-	eSIR_AUTO_SWITCH,
 	eSIR_FILS_SK_WITHOUT_PFS = 4,
 	eSIR_FILS_SK_WITH_PFS = 5,
 	eSIR_FILS_PK_AUTH = 6,
+	eSIR_AUTO_SWITCH,
 	eSIR_DONOT_USE_AUTH_TYPE = SIR_MAX_ENUM_SIZE
 } tAniAuthType;
 
@@ -95,6 +96,8 @@ typedef enum eAniEdType {
 	/* Firmware uses key length to find GCMP 128 or 256 */
 	eSIR_ED_GCMP,
 	eSIR_ED_GCMP_256,
+	eSIR_ED_AES_GMAC_128,
+	eSIR_ED_AES_GMAC_256,
 	eSIR_ED_NOT_IMPLEMENTED = SIR_MAX_ENUM_SIZE
 } tAniEdType;
 

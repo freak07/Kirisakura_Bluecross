@@ -118,6 +118,23 @@ uint8_t ccp_rsn_oui_0f[HDD_RSN_OUI_SIZE] = {0x00, 0x0F, 0xAC, 0x0F};
 uint8_t ccp_rsn_oui_10[HDD_RSN_OUI_SIZE] = {0x00, 0x0F, 0xAC, 0x10};
 uint8_t ccp_rsn_oui_11[HDD_RSN_OUI_SIZE] = {0x00, 0x0F, 0xAC, 0x11};
 #endif
+static const
+uint8_t ccp_rsn_oui_12[HDD_RSN_OUI_SIZE] = {0x50, 0x6F, 0x9A, 0x02};
+
+static const
+uint8_t ccp_rsn_oui_0b[HDD_RSN_OUI_SIZE] = {0x00, 0x0F, 0xAC, 0x0B};
+static const
+uint8_t ccp_rsn_oui_0c[HDD_RSN_OUI_SIZE] = {0x00, 0x0F, 0xAC, 0x0C};
+
+#ifdef WLAN_FEATURE_OWE
+/* OWE https://tools.ietf.org/html/rfc8110 */
+uint8_t ccp_rsn_oui_18[HDD_RSN_OUI_SIZE] = {0x00, 0x0F, 0xAC, 0x12};
+#endif
+
+#ifdef WLAN_FEATURE_SAE
+uint8_t ccp_rsn_oui_80[HDD_RSN_OUI_SIZE] = {0x00, 0x0F, 0xAC, 0x08};
+uint8_t ccp_rsn_oui_90[HDD_RSN_OUI_SIZE] = {0x00, 0x0F, 0xAC, 0x09};
+#endif
 
 /* Offset where the EID-Len-IE, start. */
 #define FT_ASSOC_RSP_IES_OFFSET 6  /* Capability(2) + AID(2) + Status Code(2) */
@@ -138,6 +155,55 @@ static const int beacon_filter_table[] = {
 	SIR_MAC_VHT_OPMODE_EID,
 	SIR_MAC_VHT_OPERATION_EID,
 };
+
+#ifdef WLAN_FEATURE_SAE
+/**
+ * wlan_hdd_sae_callback() - Sends SAE info to supplicant
+ * @adapter: pointer adapter context
+ * @roam_info: pointer to roam info
+ *
+ * This API is used to send required SAE info to trigger SAE in supplicant.
+ *
+ * Return: None
+ */
+static void wlan_hdd_sae_callback(hdd_adapter_t *adapter,
+				  tCsrRoamInfo *roam_info)
+{
+	hdd_context_t *hdd_ctx = adapter->pHddCtx;
+	int flags;
+	struct sir_sae_info *sae_info = roam_info->sae_info;
+	struct cfg80211_external_auth_params params = {0};
+
+	if (wlan_hdd_validate_context(hdd_ctx))
+		return;
+
+	if (!sae_info) {
+		hdd_err("SAE info in NULL");
+		return;
+	}
+
+	flags = cds_get_gfp_flags();
+
+	params.key_mgmt_suite = 0x00;
+	params.key_mgmt_suite |= 0x0F << 8;
+	params.key_mgmt_suite |= 0xAC << 16;
+	params.key_mgmt_suite |= 0x8 << 24;
+
+	params.action = NL80211_EXTERNAL_AUTH_START;
+	qdf_mem_copy(params.bssid, sae_info->peer_mac_addr.bytes,
+		     QDF_MAC_ADDR_SIZE);
+	qdf_mem_copy(params.ssid.ssid, sae_info->ssid.ssId,
+		     sae_info->ssid.length);
+	params.ssid.ssid_len = sae_info->ssid.length;
+
+	cfg80211_external_auth_request(adapter->dev, &params, flags);
+	hdd_debug("SAE: sent cmd");
+}
+#else
+static inline void wlan_hdd_sae_callback(hdd_adapter_t *adapter,
+					 tCsrRoamInfo *roam_info)
+{ }
+#endif
 
 /**
  * hdd_conn_set_authenticated() - set authentication state
@@ -2727,64 +2793,78 @@ static QDF_STATUS hdd_association_completion_handler(hdd_adapter_t *pAdapter,
 					pHddCtx->wiphy,
 					bss);
 			}
+
+			/* Association Response */
+			pFTAssocRsp =
+				(u8 *) (pRoamInfo->pbFrames +
+					pRoamInfo->nBeaconLength +
+					pRoamInfo->nAssocReqLength);
+			if (pFTAssocRsp != NULL) {
+				/*
+				 * pFTAssocRsp needs to point to the IEs
+				 */
+				pFTAssocRsp += FT_ASSOC_RSP_IES_OFFSET;
+				hdd_debug("AssocRsp is now at %02x%02x",
+					 (unsigned int)pFTAssocRsp[0],
+					 (unsigned int)pFTAssocRsp[1]);
+				assocRsplen =
+					pRoamInfo->nAssocRspLength -
+					FT_ASSOC_RSP_IES_OFFSET;
+
+				hdd_debug("assocRsplen %d", assocRsplen);
+				hdd_debug("Assoc Rsp IE dump");
+				QDF_TRACE_HEX_DUMP(QDF_MODULE_ID_HDD,
+							QDF_TRACE_LEVEL_DEBUG,
+							pFTAssocRsp,
+							assocRsplen);
+			} else {
+				hdd_debug("AssocRsp is NULL");
+				assocRsplen = 0;
+			}
+
+			/* Association Request */
+			pFTAssocReq = (u8 *) (pRoamInfo->pbFrames +
+						  pRoamInfo->nBeaconLength);
+			if (pFTAssocReq != NULL) {
+				if (!ft_carrier_on) {
+					/*
+					 * pFTAssocReq needs to point to
+					 * the IEs
+					 */
+					pFTAssocReq +=
+						FT_ASSOC_REQ_IES_OFFSET;
+					hdd_debug("pFTAssocReq is now at %02x%02x",
+						 (unsigned int)
+						 pFTAssocReq[0],
+						 (unsigned int)
+						 pFTAssocReq[1]);
+					assocReqlen =
+						pRoamInfo->nAssocReqLength -
+						FT_ASSOC_REQ_IES_OFFSET;
+				} else {
+					/*
+					 * This should contain only the
+					 * FTIEs
+					 */
+					assocReqlen =
+						pRoamInfo->nAssocReqLength;
+				}
+
+				hdd_debug("assocReqlen %d", assocReqlen);
+				hdd_debug("Assoc/Reassoc Req IE dump");
+				QDF_TRACE_HEX_DUMP(QDF_MODULE_ID_HDD,
+							QDF_TRACE_LEVEL_DEBUG,
+							pFTAssocReq,
+							assocReqlen);
+			} else {
+				hdd_debug("AssocReq is NULL");
+				assocReqlen = 0;
+			}
+
 			if (pRoamInfo->u.pConnectedProfile->AuthType ==
 			    eCSR_AUTH_TYPE_FT_RSN
 			    || pRoamInfo->u.pConnectedProfile->AuthType ==
 			    eCSR_AUTH_TYPE_FT_RSN_PSK) {
-
-				/* Association Response */
-				pFTAssocRsp =
-					(u8 *) (pRoamInfo->pbFrames +
-						pRoamInfo->nBeaconLength +
-						pRoamInfo->nAssocReqLength);
-				if (pFTAssocRsp != NULL) {
-					/*
-					 * pFTAssocRsp needs to point to the IEs
-					 */
-					pFTAssocRsp += FT_ASSOC_RSP_IES_OFFSET;
-					hdd_debug("AssocRsp is now at %02x%02x",
-						 (unsigned int)pFTAssocRsp[0],
-						 (unsigned int)pFTAssocRsp[1]);
-					assocRsplen =
-						pRoamInfo->nAssocRspLength -
-						FT_ASSOC_RSP_IES_OFFSET;
-				} else {
-					hdd_debug("AssocRsp is NULL");
-					assocRsplen = 0;
-				}
-
-				/* Association Request */
-				pFTAssocReq = (u8 *) (pRoamInfo->pbFrames +
-						      pRoamInfo->nBeaconLength);
-				if (pFTAssocReq != NULL) {
-					if (!ft_carrier_on) {
-						/*
-						 * pFTAssocReq needs to point to
-						 * the IEs
-						 */
-						pFTAssocReq +=
-							FT_ASSOC_REQ_IES_OFFSET;
-						hdd_debug("pFTAssocReq is now at %02x%02x",
-							 (unsigned int)
-							 pFTAssocReq[0],
-							 (unsigned int)
-							 pFTAssocReq[1]);
-						assocReqlen =
-						    pRoamInfo->nAssocReqLength -
-							FT_ASSOC_REQ_IES_OFFSET;
-					} else {
-						/*
-						 * This should contain only the
-						 * FTIEs
-						 */
-						assocReqlen =
-						    pRoamInfo->nAssocReqLength;
-					}
-				} else {
-					hdd_debug("AssocReq is NULL");
-					assocReqlen = 0;
-				}
-
 				if (ft_carrier_on) {
 					if (!hddDisconInProgress &&
 						pRoamInfo->pBssDesc) {
@@ -2814,18 +2894,6 @@ static QDF_STATUS hdd_association_completion_handler(hdd_adapter_t *pAdapter,
 								(pAdapter->wdev.wiphy,
 								(int)pRoamInfo->pBssDesc->
 								channelId);
-						hdd_debug(
-							"assocReqlen %d assocRsplen %d",
-							assocReqlen,
-							assocRsplen);
-
-						hdd_debug(
-							"Reassoc Req IE dump");
-						QDF_TRACE_HEX_DUMP(
-							QDF_MODULE_ID_HDD,
-							QDF_TRACE_LEVEL_DEBUG,
-							pFTAssocReq,
-							assocReqlen);
 						roam_bss =
 							hdd_cfg80211_get_bss(
 								pAdapter->wdev.wiphy,
@@ -2932,10 +3000,10 @@ static QDF_STATUS hdd_association_completion_handler(hdd_adapter_t *pAdapter,
 								   pRoamInfo->
 								   bssid.bytes,
 								   pRoamInfo,
-								   reqRsnIe,
-								   reqRsnLength,
-								   rspRsnIe,
-								   rspRsnLength,
+								   pFTAssocReq,
+								   assocReqlen,
+								   pFTAssocRsp,
+								   assocRsplen,
 								   WLAN_STATUS_SUCCESS,
 								   GFP_KERNEL,
 								   false,
@@ -5330,6 +5398,10 @@ hdd_sme_roam_callback(void *pContext, tCsrRoamInfo *pRoamInfo, uint32_t roamId,
 		complete(&pAdapter->roaming_comp_var);
 		schedule_delayed_work(&pHddCtx->roc_req_work, 0);
 		break;
+	case eCSR_ROAM_SAE_COMPUTE:
+		if (pRoamInfo)
+			wlan_hdd_sae_callback(pAdapter, pRoamInfo);
+		break;
 
 	default:
 		break;
@@ -5359,6 +5431,48 @@ static void hdd_translate_fils_rsn_to_csr_auth(int8_t auth_suite[4],
 }
 #else
 static inline void hdd_translate_fils_rsn_to_csr_auth(int8_t auth_suite[4],
+					eCsrAuthType *auth_type)
+{
+}
+#endif
+
+#ifdef WLAN_FEATURE_OWE
+/**
+ * hdd_translate_owe_rsn_to_csr_auth() - Translate OWE RSN to CSR auth type
+ * @auth_suite: auth suite
+ * @auth_type: pointer to eCsrAuthType
+ *
+ * Return: None
+ */
+static void hdd_translate_owe_rsn_to_csr_auth(int8_t auth_suite[4],
+					eCsrAuthType *auth_type)
+{
+	if (memcmp(auth_suite, ccp_rsn_oui_18, 4) == 0)
+		*auth_type = eCSR_AUTH_TYPE_OWE;
+}
+#else
+static inline void hdd_translate_owe_rsn_to_csr_auth(int8_t auth_suite[4],
+					eCsrAuthType *auth_type)
+{
+}
+#endif
+
+#ifdef WLAN_FEATURE_SAE
+/**
+ * hdd_translate_sae_rsn_to_csr_auth() - Translate SAE RSN to CSR auth type
+ * @auth_suite: auth suite
+ * @auth_type: pointer to eCsrAuthType
+ *
+ * Return: None
+ */
+static void hdd_translate_sae_rsn_to_csr_auth(int8_t auth_suite[4],
+					eCsrAuthType *auth_type)
+{
+	if (qdf_mem_cmp(auth_suite, ccp_rsn_oui_80, 4) == 0)
+		*auth_type = eCSR_AUTH_TYPE_SAE;
+}
+#else
+static inline void hdd_translate_sae_rsn_to_csr_auth(int8_t auth_suite[4],
 					eCsrAuthType *auth_type)
 {
 }
@@ -5397,8 +5511,18 @@ eCsrAuthType hdd_translate_rsn_to_csr_auth_type(uint8_t auth_suite[4])
 		auth_type = eCSR_AUTH_TYPE_RSN_8021X_SHA256;
 	} else
 #endif
-	{
+	if (memcmp(auth_suite, ccp_rsn_oui_0b, 4) == 0) {
+		/* Check for Suite B EAP 256 */
+		auth_type = eCSR_AUTH_TYPE_SUITEB_EAP_SHA256;
+	} else if (memcmp(auth_suite, ccp_rsn_oui_0c, 4) == 0) {
+		/* Check for Suite B EAP 384 */
+		auth_type = eCSR_AUTH_TYPE_SUITEB_EAP_SHA384;
+	} else if (memcmp(auth_suite, ccp_rsn_oui_12, 4) == 0) {
+		auth_type = eCSR_AUTH_TYPE_DPP_RSN;
+	} else {
 		hdd_translate_fils_rsn_to_csr_auth(auth_suite, &auth_type);
+		hdd_translate_owe_rsn_to_csr_auth(auth_suite, &auth_type);
+		hdd_translate_sae_rsn_to_csr_auth(auth_suite, &auth_type);
 	}
 	hdd_debug("auth_type: %d", auth_type);
 	return auth_type;
@@ -5800,6 +5924,33 @@ static bool hdd_check_fils_rsn_n_set_auth_type(tCsrRoamProfile *roam_profile,
 }
 #endif
 
+#ifdef WLAN_FEATURE_OWE
+/**
+ * hdd_check_is_owe_auth_type() - This API checks whether a give
+ * auth type is OWE if yes, sets it in profile.
+ * @rsn_auth_type: auth type
+ *
+ * Return: true if OWE auth else false
+ */
+static bool hdd_check_is_owe_auth_type(tCsrRoamProfile *roam_profile,
+			    eCsrAuthType rsn_auth_type)
+{
+	bool is_owe_rsn = false;
+
+	if (rsn_auth_type == eCSR_AUTH_TYPE_OWE)
+		is_owe_rsn = true;
+
+	return is_owe_rsn;
+}
+#else
+static bool hdd_check_is_owe_auth_type(tCsrRoamProfile *roam_profile,
+			    eCsrAuthType rsn_auth_type)
+{
+	return false;
+}
+#endif
+
+
 /**
  * hdd_set_csr_auth_type() - set csr auth type
  * @pAdapter: pointer to adapter
@@ -5814,8 +5965,9 @@ int hdd_set_csr_auth_type(hdd_adapter_t *pAdapter, eCsrAuthType RSNAuthType)
 	hdd_station_ctx_t *pHddStaCtx = WLAN_HDD_GET_STATION_CTX_PTR(pAdapter);
 
 	pRoamProfile->AuthType.numEntries = 1;
-	hdd_debug("pHddStaCtx->conn_info.authType = %d",
-		 pHddStaCtx->conn_info.authType);
+	hdd_debug("authType = %d RSNAuthType %d wpa_version %d",
+		  pHddStaCtx->conn_info.authType, RSNAuthType,
+		  pWextState->wpaVersion);
 
 	switch (pHddStaCtx->conn_info.authType) {
 	case eCSR_AUTH_TYPE_OPEN_SYSTEM:
@@ -5871,8 +6023,10 @@ int hdd_set_csr_auth_type(hdd_adapter_t *pAdapter, eCsrAuthType RSNAuthType)
 					eCSR_AUTH_TYPE_CCKM_RSN;
 			} else
 #endif
-
-			if ((RSNAuthType == eCSR_AUTH_TYPE_FT_RSN) &&
+			if (RSNAuthType == eCSR_AUTH_TYPE_DPP_RSN) {
+				pRoamProfile->AuthType.authType[0] =
+							eCSR_AUTH_TYPE_DPP_RSN;
+			} else if ((RSNAuthType == eCSR_AUTH_TYPE_FT_RSN) &&
 			    ((pWextState->
 			      authKeyMgmt & IW_AUTH_KEY_MGMT_802_1X)
 			     == IW_AUTH_KEY_MGMT_802_1X)) {
@@ -5904,6 +6058,28 @@ int hdd_set_csr_auth_type(hdd_adapter_t *pAdapter, eCsrAuthType RSNAuthType)
 				hdd_debug("updated profile authtype as %d",
 					RSNAuthType);
 
+			} else if (hdd_check_is_owe_auth_type(
+				   pRoamProfile, RSNAuthType)) {
+				pRoamProfile->AuthType.authType[0] =
+					RSNAuthType;
+				hdd_debug("updated profile authtype as %d",
+					RSNAuthType);
+			} else if ((RSNAuthType ==
+				  eCSR_AUTH_TYPE_SUITEB_EAP_SHA256) &&
+				  ((pWextState->
+				  authKeyMgmt & IW_AUTH_KEY_MGMT_802_1X)
+				  == IW_AUTH_KEY_MGMT_802_1X)) {
+				/* Suite B EAP SHA 256 */
+				pRoamProfile->AuthType.authType[0] =
+					eCSR_AUTH_TYPE_SUITEB_EAP_SHA256;
+			} else if ((RSNAuthType ==
+				  eCSR_AUTH_TYPE_SUITEB_EAP_SHA384) &&
+				  ((pWextState->
+				  authKeyMgmt & IW_AUTH_KEY_MGMT_802_1X)
+				  == IW_AUTH_KEY_MGMT_802_1X)) {
+				/* Suite B EAP SHA 384 */
+				pRoamProfile->AuthType.authType[0] =
+					eCSR_AUTH_TYPE_SUITEB_EAP_SHA384;
 			} else if ((pWextState->
 			     authKeyMgmt & IW_AUTH_KEY_MGMT_802_1X)
 			    == IW_AUTH_KEY_MGMT_802_1X) {
@@ -5925,6 +6101,11 @@ int hdd_set_csr_auth_type(hdd_adapter_t *pAdapter, eCsrAuthType RSNAuthType)
 
 		pRoamProfile->AuthType.authType[0] = eCSR_AUTH_TYPE_SHARED_KEY;
 		break;
+
+	case eCSR_AUTH_TYPE_SAE:
+		pRoamProfile->AuthType.authType[0] = eCSR_AUTH_TYPE_SAE;
+		break;
+
 	default:
 
 #ifdef FEATURE_WLAN_ESE

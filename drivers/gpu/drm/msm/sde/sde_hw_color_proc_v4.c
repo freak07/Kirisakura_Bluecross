@@ -15,9 +15,17 @@
 #include "sde_hw_color_proc_common_v4.h"
 #include "sde_hw_color_proc_v4.h"
 
+#ifdef CONFIG_KLAPSE
+#include "klapse.h"
+
+unsigned short kcal_red = 256;
+unsigned short kcal_green = 256;
+unsigned short kcal_blue = 256;
+#else
 unsigned int kcal_red = 256;
 unsigned int kcal_green = 256;
 unsigned int kcal_blue = 256;
+#endif
 unsigned int kcal_hue = 0;
 unsigned int kcal_sat = 255;
 unsigned int kcal_val = 255;

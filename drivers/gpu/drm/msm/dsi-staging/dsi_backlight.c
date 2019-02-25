@@ -28,6 +28,10 @@
 #include "dsi_display.h"
 #include "dsi_panel.h"
 
+#ifdef CONFIG_KLAPSE
+#include "../sde/klapse.h"
+#endif
+
 #define BL_NODE_NAME_SIZE 32
 
 #define BL_STATE_STANDBY	BL_CORE_FBBLANK
@@ -457,6 +461,10 @@ static u32 dsi_backlight_calculate(struct dsi_backlight_config *bl,
 	pr_debug("brightness=%d, bl_scale=%d, ad=%d, bl_lvl=%d, hbm = %d\n",
 			brightness, bl->bl_scale, bl->bl_scale_ad, bl_lvl,
 			panel->hbm_mode);
+
+#ifdef CONFIG_KLAPSE
+	set_rgb_slider(bl_lvl);
+#endif
 
 	return bl_lvl;
 }

@@ -174,11 +174,12 @@ static void *crus_gen_afe_set_header(int length, int port, int module,
 static int crus_afe_get_param(int port, int module, int param, int length,
 			      void *data)
 {
+	const int scale_factor = 100000000;
 	struct afe_custom_crus_get_config_t *config = NULL;
 	int index = afe_get_port_index(port);
 	int ret = 0, count = 0;
 
-	pr_info("%s: port = %d module = %d param = 0x%x length = %d\n",
+	pr_debug("%s: port = %d module = %d param = 0x%x length = %d\n",
 		__func__, port, module, param, length);
 
 	if (!msm_crus_is_cirrus_afe_topology()) {
@@ -193,7 +194,7 @@ static int crus_afe_get_param(int port, int module, int param, int length,
 		return -ENOMEM;
 	}
 
-	pr_info("%s: Preparing to send apr packet\n", __func__);
+	pr_debug("%s: Preparing to send apr packet\n", __func__);
 
 	mutex_lock(&crus_sp_get_param_lock);
 	atomic_set(&crus_sp_get_param_flag, 0);
@@ -213,7 +214,7 @@ static int crus_afe_get_param(int port, int module, int param, int length,
 		pr_err("%s: crus get_param for port %d failed with code %d\n",
 						__func__, port, ret);
 	else
-		pr_info("%s: crus get_param sent packet with param id 0x%08x "
+		pr_debug("%s: crus get_param sent packet with param id 0x%08x "
 			"to module 0x%08x.\n", __func__, param, module);
 
 	/* Wait for afe callback to populate data */
@@ -225,6 +226,15 @@ static int crus_afe_get_param(int port, int module, int param, int length,
 			ret = -EINVAL;
 			goto crus_sp_get_param_err;
 		}
+	}
+
+	if (param == CRUS_PARAM_RX_GET_TEMP) {
+		pr_info("%s: left impedance %d.%d ohms", __func__,
+				crus_spk.imp_l / scale_factor,
+				crus_spk.imp_l % scale_factor);
+		pr_info("%s: right impedance %d.%d ohms", __func__,
+				crus_spk.imp_r / scale_factor,
+				crus_spk.imp_r % scale_factor);
 	}
 
 	/* Copy from dynamic buffer to return buffer */

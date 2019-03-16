@@ -4300,7 +4300,7 @@ static int perf_event_release(struct perf_event *event)
 	 *  back online.
 	 */
 #if defined CONFIG_HOTPLUG_CPU || defined CONFIG_KEXEC_CORE
-	if (event->cpu != -1 && !cpu_online(event->cpu)) {
+	if (event->cpu != -1 && per_cpu(is_hotplugging, event->cpu)) {
 		if (event->state == PERF_EVENT_STATE_ZOMBIE)
 			return 0;
 
@@ -11180,6 +11180,7 @@ static int perf_event_start_swevents(unsigned int cpu)
 	struct perf_event *event;
 	int idx;
 
+	mutex_lock(&pmus_lock);
 	perf_event_zombie_cleanup(cpu);
 
 	idx = srcu_read_lock(&pmus_srcu);
@@ -11194,6 +11195,8 @@ static int perf_event_start_swevents(unsigned int cpu)
 	}
 	srcu_read_unlock(&pmus_srcu, idx);
 	per_cpu(is_hotplugging, cpu) = false;
+	mutex_unlock(&pmus_lock);
+
 	return 0;
 }
 
@@ -11233,13 +11236,25 @@ static void __perf_event_exit_context(void *__info)
 
 static void perf_event_exit_cpu_context(int cpu)
 {
+	struct perf_cpu_context *cpuctx;
 	struct perf_event_context *ctx;
+	unsigned long flags;
 	struct pmu *pmu;
 	int idx;
 
 	idx = srcu_read_lock(&pmus_srcu);
 	list_for_each_entry_rcu(pmu, &pmus, entry) {
-		ctx = &per_cpu_ptr(pmu->pmu_cpu_context, cpu)->ctx;
+		cpuctx = per_cpu_ptr(pmu->pmu_cpu_context, cpu);
+		ctx = &cpuctx->ctx;
+
+		/* Cancel the mux hrtimer to avoid CPU migration */
+		if (pmu->task_ctx_nr != perf_sw_context) {
+			raw_spin_lock_irqsave(&cpuctx->hrtimer_lock, flags);
+			hrtimer_cancel(&cpuctx->hrtimer);
+			cpuctx->hrtimer_active = 0;
+			raw_spin_unlock_irqrestore(&cpuctx->hrtimer_lock,
+							flags);
+		}
 
 		mutex_lock(&ctx->mutex);
 		smp_call_function_single(cpu, __perf_event_exit_context, ctx, 1);
@@ -11255,8 +11270,10 @@ static void perf_event_exit_cpu_context(int cpu) { }
 
 int perf_event_exit_cpu(unsigned int cpu)
 {
+	mutex_lock(&pmus_lock);
 	per_cpu(is_hotplugging, cpu) = true;
 	perf_event_exit_cpu_context(cpu);
+	mutex_unlock(&pmus_lock);
 	return 0;
 }
 

@@ -26,6 +26,7 @@ struct sched_param {
 #include <linux/nodemask.h>
 #include <linux/mm_types.h>
 #include <linux/preempt.h>
+#include <linux/mm_event.h>
 
 #include <asm/page.h>
 #include <asm/ptrace.h>
@@ -51,6 +52,7 @@ struct sched_param {
 #include <linux/timer.h>
 #include <linux/hrtimer.h>
 #include <linux/kcov.h>
+#include <linux/psi_types.h>
 #include <linux/task_io_accounting.h>
 #include <linux/latencytop.h>
 #include <linux/cred.h>
@@ -139,31 +141,6 @@ struct nameidata;
 #define VMACACHE_SIZE (1U << VMACACHE_BITS)
 #define VMACACHE_MASK (VMACACHE_SIZE - 1)
 
-/*
- * These are the constant used to fake the fixed-point load-average
- * counting. Some notes:
- *  - 11 bit fractions expand to 22 bits by the multiplies: this gives
- *    a load-average precision of 10 bits integer + 11 bits fractional
- *  - if you want to count load-averages more often, you need more
- *    precision, or rounding will get you. With 2-second counting freq,
- *    the EXP_n values would be 1981, 2034 and 2043 if still using only
- *    11 bit fractions.
- */
-extern unsigned long avenrun[];		/* Load averages */
-extern void get_avenrun(unsigned long *loads, unsigned long offset, int shift);
-
-#define FSHIFT		11		/* nr of bits of precision */
-#define FIXED_1		(1<<FSHIFT)	/* 1.0 as fixed-point */
-#define LOAD_FREQ	(5*HZ+1)	/* 5 sec intervals */
-#define EXP_1		1884		/* 1/exp(5sec/1min) as fixed-point */
-#define EXP_5		2014		/* 1/exp(5sec/5min) */
-#define EXP_15		2037		/* 1/exp(5sec/15min) */
-
-#define CALC_LOAD(load,exp,n) \
-	load *= exp; \
-	load += n*(FIXED_1-exp); \
-	load >>= FSHIFT;
-
 extern unsigned long total_forks;
 extern int nr_threads;
 DECLARE_PER_CPU(unsigned long, process_counts);
@@ -213,8 +190,6 @@ static inline int sched_set_wake_up_idle(struct task_struct *p,
 	return 0;
 }
 #endif
-
-extern void calc_global_load(unsigned long ticks);
 
 #if defined(CONFIG_SMP) && defined(CONFIG_NO_HZ_COMMON)
 extern void cpu_load_update_nohz_start(void);
@@ -1020,39 +995,7 @@ struct sched_info {
 };
 #endif /* CONFIG_SCHED_INFO */
 
-#ifdef CONFIG_TASK_DELAY_ACCT
-struct task_delay_info {
-	spinlock_t	lock;
-	unsigned int	flags;	/* Private per-task flags */
-
-	/* For each stat XXX, add following, aligned appropriately
-	 *
-	 * struct timespec XXX_start, XXX_end;
-	 * u64 XXX_delay;
-	 * u32 XXX_count;
-	 *
-	 * Atomicity of updates to XXX_delay, XXX_count protected by
-	 * single lock above (split into XXX_lock if contention is an issue).
-	 */
-
-	/*
-	 * XXX_count is incremented on every XXX operation, the delay
-	 * associated with the operation is added to XXX_delay.
-	 * XXX_delay contains the accumulated delay time in nanoseconds.
-	 */
-	u64 blkio_start;	/* Shared by blkio, swapin */
-	u64 blkio_delay;	/* wait for sync block io completion */
-	u64 swapin_delay;	/* wait for swapin block io completion */
-	u32 blkio_count;	/* total count of the number of sync block */
-				/* io operations performed */
-	u32 swapin_count;	/* total count of the number of swapin block */
-				/* io operations performed */
-
-	u64 freepages_start;
-	u64 freepages_delay;	/* wait for memory reclaim */
-	u32 freepages_count;	/* total count of memory reclaim */
-};
-#endif	/* CONFIG_TASK_DELAY_ACCT */
+struct task_delay_info;
 
 static inline int sched_info_on(void)
 {
@@ -1748,12 +1691,6 @@ struct task_struct {
 	unsigned int flags;	/* per process flags, defined below */
 	unsigned int ptrace;
 
-#ifdef CONFIG_SAFESTACK
-	void *unsafe_stack;
-	void *unsafe_stack_ptr;
-	void *unsafe_saved_ptr;
-#endif
-
 #ifdef CONFIG_SMP
 	struct llist_node wake_entry;
 	int on_cpu;
@@ -1853,6 +1790,10 @@ struct task_struct {
 	unsigned sched_contributes_to_load:1;
 	unsigned sched_migrated:1;
 	unsigned sched_remote_wakeup:1;
+#ifdef CONFIG_PSI
+	unsigned			sched_psi_wake_requeue:1;
+#endif
+
 	unsigned :0; /* force alignment to the next boundary */
 
 	/* unserialized, strictly 'current' */
@@ -2020,6 +1961,10 @@ struct task_struct {
 	struct rt_mutex_waiter *pi_blocked_on;
 #endif
 
+#ifdef CONFIG_MM_EVENT_STAT
+	struct mm_event_task	mm_event[MM_TYPE_NUM];
+	unsigned long		next_period;
+#endif
 #ifdef CONFIG_DEBUG_MUTEXES
 	/* mutex deadlock detection */
 	struct mutex_waiter *blocked_on;
@@ -2072,6 +2017,10 @@ struct task_struct {
 	unsigned long ptrace_message;
 	siginfo_t *last_siginfo; /* For ptrace use.  */
 	struct task_io_accounting ioac;
+#ifdef CONFIG_PSI
+	/* Pressure stall state */
+	unsigned int			psi_flags;
+#endif
 #if defined(CONFIG_TASK_XACCT)
 	u64 acct_rss_mem1;	/* accumulated rss usage */
 	u64 acct_vm_mem1;	/* accumulated virtual memory usage */
@@ -2165,9 +2114,10 @@ struct task_struct {
 
 	struct page_frag task_frag;
 
-#ifdef	CONFIG_TASK_DELAY_ACCT
-	struct task_delay_info *delays;
+#ifdef CONFIG_TASK_DELAY_ACCT
+	struct task_delay_info		*delays;
 #endif
+
 #ifdef CONFIG_FAULT_INJECTION
 	int make_it_fail;
 #endif
@@ -2578,6 +2528,7 @@ extern void thread_group_cputime_adjusted(struct task_struct *p, cputime_t *ut, 
 #define PF_KTHREAD	0x00200000	/* I am a kernel thread */
 #define PF_RANDOMIZE	0x00400000	/* randomize virtual address space */
 #define PF_SWAPWRITE	0x00800000	/* Allowed to write to swap */
+#define PF_MEMSTALL	0x01000000	/* Stalled due to lack of memory */
 #define PF_NO_SETAFFINITY 0x04000000	/* Userland is not allowed to meddle with cpus_allowed */
 #define PF_MCE_EARLY    0x08000000      /* Early kill for mce process policy */
 #define PF_MUTEX_TESTER	0x20000000	/* Thread belongs to the rt mutex tester */
@@ -3585,18 +3536,14 @@ static inline void *try_get_task_stack(struct task_struct *tsk)
 static inline void put_task_stack(struct task_struct *tsk) {}
 #endif
 
-#include <linux/safestack.h>
-
 #define task_stack_end_corrupted(task) \
-		(*(end_of_stack(task)) != STACK_END_MAGIC || \
-			unsafe_stack_corrupted(task))
+		(*(end_of_stack(task)) != STACK_END_MAGIC)
 
 static inline int object_is_on_stack(void *obj)
 {
 	void *stack = task_stack_page(current);
 
-	return ((obj >= stack) && (obj < (stack + THREAD_SIZE))) ||
-			object_is_on_unsafe_stack(obj);
+	return (obj >= stack) && (obj < (stack + THREAD_SIZE));
 }
 
 extern void thread_stack_cache_init(void);

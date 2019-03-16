@@ -134,6 +134,11 @@ static int fts_mode_handler(struct fts_ts_info *info, int force);
 
 static int fts_chip_initialization(struct fts_ts_info *info, int init_type);
 
+static void fts_report_timestamp(struct fts_ts_info *info)
+{
+	input_event(info->input_dev, EV_MSC, MSC_TIMESTAMP,
+		info->timestamp / 1000);
+}
 
 /**
   * Release all the touches in the linux input subsystem
@@ -157,6 +162,7 @@ void release_all_touches(struct fts_ts_info *info)
 		input_report_abs(info->input_dev, ABS_MT_TRACKING_ID, -1);
 	}
 	input_report_key(info->input_dev, BTN_TOUCH, 0);
+	fts_report_timestamp(info);
 	input_sync(info->input_dev);
 	info->touch_id = 0;
 #ifdef STYLUS_MODE
@@ -343,11 +349,10 @@ static ssize_t fts_status_show(struct device *dev,
 	int i;
 
 	if (fts_set_bus_ref(info, FTS_BUS_REF_SYSFS, true) < 0) {
-		res = ERROR_BUS_WR;
-		pr_err("%s: bus is not accessible.", __func__);
-		written += scnprintf(buf, PAGE_SIZE, "Bus is not accessible.");
-		fts_set_bus_ref(info, FTS_BUS_REF_SYSFS, false);
-		return written;
+		pr_err("%s: bus is not accessible.\n", __func__);
+		written += scnprintf(buf, PAGE_SIZE,
+				     "Bus is not accessible.\n");
+		goto exit;
 	}
 
 	written += scnprintf(buf + written, PAGE_SIZE - written,
@@ -365,11 +370,10 @@ static ssize_t fts_status_show(struct device *dev,
 	if (!dump) {
 		written += strlcat(buf + written, "Buffer allocation failed!\n",
 				   PAGE_SIZE - written);
-		res = -ENOMEM;
-	} else {
-		res = dumpErrorInfo(dump,
-				    ERROR_DUMP_ROW_SIZE * ERROR_DUMP_COL_SIZE);
+		goto exit;
 	}
+
+	res = dumpErrorInfo(dump, ERROR_DUMP_ROW_SIZE * ERROR_DUMP_COL_SIZE);
 	if (res >= 0) {
 		written += strlcat(buf + written, "Error dump:",
 				   PAGE_SIZE - written);
@@ -384,8 +388,9 @@ static ssize_t fts_status_show(struct device *dev,
 		}
 		written += strlcat(buf + written, "\n", PAGE_SIZE - written);
 	}
-	kfree(dump);
 
+exit:
+	kfree(dump);
 	fts_set_bus_ref(info, FTS_BUS_REF_SYSFS, false);
 	return written;
 }
@@ -1417,10 +1422,22 @@ static ssize_t stm_fts_cmd_store(struct device *dev,
 {
 	int n;
 	char *p = (char *)buf;
+	struct fts_ts_info *info = dev_get_drvdata(dev);
 
 	memset(typeOfComand, 0, CMD_STR_LEN * sizeof(u32));
 
 	pr_info("%s:\n", __func__);
+
+	if (!info) {
+		pr_err("%s: Unable to access driver data\n", __func__);
+		return  -EINVAL;
+	}
+
+	if (!mutex_trylock(&info->diag_cmd_lock)) {
+		pr_err("%s: Blocking concurrent access\n", __func__);
+		return -EBUSY;
+	}
+
 	for (n = 0; n < (count + 1) / 3; n++) {
 		sscanf(p, "%02X ", &typeOfComand[n]);
 		p += 3;
@@ -1429,6 +1446,9 @@ static ssize_t stm_fts_cmd_store(struct device *dev,
 
 	numberParameters = n;
 	pr_info("Number of Parameters = %d\n", numberParameters);
+
+	mutex_unlock(&info->diag_cmd_lock);
+
 	return count;
 }
 
@@ -1447,11 +1467,22 @@ static ssize_t stm_fts_cmd_show(struct device *dev,
 	MutualSenseFrame frameMS;
 	SelfSenseFrame frameSS;
 
+	if (!info) {
+		pr_err("%s: Unable to access driver data\n", __func__);
+		return  -EINVAL;
+	}
+
+	if (!mutex_trylock(&info->diag_cmd_lock)) {
+		pr_err("%s: Blocking concurrent access\n", __func__);
+		return -EBUSY;
+	}
+
 	if (fts_set_bus_ref(info, FTS_BUS_REF_SYSFS, true) < 0) {
 		res = ERROR_BUS_WR;
 		pr_err("%s: bus is not accessible.\n", __func__);
 		scnprintf(buf, PAGE_SIZE, "{ %08X }\n", res);
 		fts_set_bus_ref(info, FTS_BUS_REF_SYSFS, false);
+		mutex_unlock(&info->diag_cmd_lock);
 		return 0;
 	}
 
@@ -1954,6 +1985,8 @@ END:
 	/* pr_err("numberParameters = %d\n", numberParameters); */
 
 	fts_set_bus_ref(info, FTS_BUS_REF_SYSFS, false);
+	mutex_unlock(&info->diag_cmd_lock);
+
 	return index;
 }
 
@@ -2081,13 +2114,14 @@ void fts_input_report_key(struct fts_ts_info *info, int key_code)
 /**
   * Event Handler for no events (EVT_ID_NOEVENT)
   */
-static void fts_nop_event_handler(struct fts_ts_info *info, unsigned
+static bool fts_nop_event_handler(struct fts_ts_info *info, unsigned
 				  char *event)
 {
 	pr_info("%s: Doing nothing for event = %02X %02X %02X %02X %02X %02X %02X %02X\n",
 		__func__, event[0], event[1], event[2], event[3],
 		event[4],
 		event[5], event[6], event[7]);
+	return false;
 }
 
 /**
@@ -2096,7 +2130,7 @@ static void fts_nop_event_handler(struct fts_ts_info *info, unsigned
   * report touch coordinates and additional information
   * to the linux input system
   */
-static void fts_enter_pointer_event_handler(struct fts_ts_info *info, unsigned
+static bool fts_enter_pointer_event_handler(struct fts_ts_info *info, unsigned
 					    char *event)
 {
 	unsigned char touchId;
@@ -2196,15 +2230,16 @@ static void fts_enter_pointer_event_handler(struct fts_ts_info *info, unsigned
 	 * Size = %d\n",
 	  *	__func__, *event, touchId, x, y, touchType); */
 
+	return true;
 no_report:
-	return;
+	return false;
 }
 
 /**
   * Event handler for leave event (EVT_ID_LEAVE_POINT )
   * Report to the linux input system that one touch left the display
   */
-static void fts_leave_pointer_event_handler(struct fts_ts_info *info, unsigned
+static bool fts_leave_pointer_event_handler(struct fts_ts_info *info, unsigned
 					    char *event)
 {
 	unsigned char touchId;
@@ -2245,18 +2280,19 @@ static void fts_leave_pointer_event_handler(struct fts_ts_info *info, unsigned
 	default:
 		pr_err("%s : Invalid touch type = %d ! No Report...\n",
 			__func__, touchType);
-		return;
+		return false;
 	}
 
 	input_mt_report_slot_state(info->input_dev, tool, 0);
 
 	/* pr_info("%s : TouchID = %d, Touchcount = %d\n", __func__,
-	  *	touchId,touchcount); */
+	 *	touchId,touchcount); */
 
 
 	input_report_abs(info->input_dev, ABS_MT_TRACKING_ID, -1);
 	/* pr_info("%s : Event 0x%02x - release ID[%d]\n", __func__,
-	  *	event[0], touchId); */
+	 *	event[0], touchId); */
+	return true;
 }
 
 /* EventId : EVT_ID_MOTION_POINT */
@@ -2269,7 +2305,7 @@ static void fts_leave_pointer_event_handler(struct fts_ts_info *info, unsigned
   * Handle unexpected error events implementing recovery strategy and
   * restoring the sensing status that the IC had before the error occurred
   */
-static void fts_error_event_handler(struct fts_ts_info *info, unsigned
+static bool fts_error_event_handler(struct fts_ts_info *info, unsigned
 				    char *event)
 {
 	int error = 0;
@@ -2308,6 +2344,7 @@ static void fts_error_event_handler(struct fts_ts_info *info, unsigned
 	}
 	break;
 	}
+	return false;
 }
 
 /**
@@ -2315,7 +2352,7 @@ static void fts_error_event_handler(struct fts_ts_info *info, unsigned
   * Handle controller events received after unexpected reset of the IC updating
   * the resets flag and restoring the proper sensing status
   */
-static void fts_controller_ready_event_handler(struct fts_ts_info *info,
+static bool fts_controller_ready_event_handler(struct fts_ts_info *info,
 					       unsigned char *event)
 {
 	int error;
@@ -2330,13 +2367,14 @@ static void fts_controller_ready_event_handler(struct fts_ts_info *info,
 	if (error < OK)
 		pr_err("%s Cannot restore the device status ERROR %08X\n",
 			__func__, error);
+	return false;
 }
 
 /**
   * Event handler for status events (EVT_ID_STATUS_UPDATE)
   * Handle status update events
   */
-static void fts_status_event_handler(struct fts_ts_info *info, unsigned
+static bool fts_status_event_handler(struct fts_ts_info *info, unsigned
 				     char *event)
 {
 	switch (event[1]) {
@@ -2476,6 +2514,7 @@ static void fts_status_event_handler(struct fts_ts_info *info, unsigned
 			event[4], event[5], event[6], event[7]);
 		break;
 	}
+	return false;
 }
 
 
@@ -2672,7 +2711,7 @@ gesture_done:
   * Handle user events reported by the FW due to some interaction triggered
   * by an external user (press keys, perform gestures, etc.)
   */
-static void fts_user_report_event_handler(struct fts_ts_info *info, unsigned
+static bool fts_user_report_event_handler(struct fts_ts_info *info, unsigned
 					  char *event)
 {
 	switch (event[1]) {
@@ -2700,6 +2739,97 @@ static void fts_user_report_event_handler(struct fts_ts_info *info, unsigned
 			event[4], event[5], event[6], event[7]);
 		break;
 	}
+	return false;
+}
+
+static void heatmap_enable(void)
+{
+	unsigned char command[] = {0xA4, 0x06, LOCAL_HEATMAP_MODE};
+	fts_write(command, 3);
+}
+
+static bool read_heatmap_raw(struct v4l2_heatmap *v4l2, strength_t *data)
+{
+	unsigned char heatmap_read_command[] = {0xA6, 0x00, 0x00};
+
+	unsigned int num_elements;
+	/* index for looping through the heatmap buffer read over the bus */
+	unsigned int local_i;
+
+	int result;
+
+	/* old value of the counter, for comparison */
+	static uint16_t counter;
+
+	strength_t heatmap_value;
+	/* final position of the heatmap value in the full heatmap frame */
+	unsigned int frame_i;
+
+	int heatmap_x, heatmap_y;
+	int max_x = v4l2->format.width;
+	int max_y = v4l2->format.height;
+
+	struct heatmap_report report = {0};
+
+	result = fts_writeRead(heatmap_read_command, 3,
+		(uint8_t *) &report, sizeof(report));
+	if (result != OK) {
+		pr_err("%s: i2c read failed, fts_writeRead returned %i",
+			__func__, result);
+		return false;
+	}
+	if (report.mode != LOCAL_HEATMAP_MODE) {
+		pr_err("Touch IC not in local heatmap mode: %X %X %i",
+			report.prefix, report.mode, report.counter);
+		return false;
+	}
+
+	le16_to_cpus(&report.counter); /* enforce little-endian order */
+	if (report.counter == counter && counter != 0) {
+		/*
+		 * We shouldn't make ordered comparisons because of
+		 * potential overflow, but at least the value
+		 * should have changed. If the value remains the same,
+		 * but we are processing a new interrupt,
+		 * this could indicate slowness in the interrupt handler.
+		 */
+		pr_warn("Heatmap frame has stale counter value %i",
+			counter);
+	}
+	counter = report.counter;
+	num_elements = report.size_x * report.size_y;
+	if (num_elements > LOCAL_HEATMAP_WIDTH * LOCAL_HEATMAP_HEIGHT) {
+		pr_err("Unexpected heatmap size: %i x %i",
+				report.size_x, report.size_y);
+		return false;
+	}
+
+	/* set all to zero, will only write to non-zero locations in the loop */
+	memset(data, 0, max_x * max_y * sizeof(data[0]));
+	/* populate the data buffer, rearranging into final locations */
+	for (local_i = 0; local_i < num_elements; local_i++) {
+		/* enforce little-endian order */
+		le16_to_cpus(&report.data[local_i]);
+		heatmap_value = report.data[local_i];
+
+		if (heatmap_value == 0) {
+			/* Already set to zero. Nothing to do */
+			continue;
+		}
+
+		heatmap_x = report.offset_x + (local_i % report.size_x);
+		heatmap_y = report.offset_y + (local_i / report.size_x);
+
+		if (heatmap_x < 0 || heatmap_x >= max_x ||
+			heatmap_y < 0 || heatmap_y >= max_y) {
+				pr_err("Invalid x or y: (%i, %i), value=%i, ending loop\n",
+					heatmap_x, heatmap_y, heatmap_value);
+				return false;
+		}
+		frame_i = heatmap_y * max_x + heatmap_x;
+		data[frame_i] = heatmap_value;
+	}
+	return true;
 }
 
 /**
@@ -2721,6 +2851,7 @@ static irqreturn_t fts_interrupt_handler(int irq, void *handle)
 	unsigned char events_remaining = 0;
 	unsigned char *evt_data;
 	event_dispatch_handler_t event_handler;
+	bool processed_pointer_event = false;
 
 	/* It is possible that interrupts were disabled while the handler is
 	 * executing, before acquiring the mutex. If so, simply return.
@@ -2764,7 +2895,8 @@ static irqreturn_t fts_interrupt_handler(int irq, void *handle)
 			if (eventId < NUM_EVT_ID) {
 				event_handler =
 					info->event_dispatch_table[eventId];
-				event_handler(info, (evt_data));
+				processed_pointer_event =
+					event_handler(info, evt_data);
 			}
 		}
 	}
@@ -2772,7 +2904,17 @@ static irqreturn_t fts_interrupt_handler(int irq, void *handle)
 	if (info->touch_id == 0)
 		input_report_key(info->input_dev, BTN_TOUCH, 0);
 
+	/*
+	 * Only report timestamp for pointer events and ignore events
+	 * like errors, status updates, etc.
+	 * Otherwise, we will generate events that only consist of timestamps.
+	 */
+	if (processed_pointer_event) {
+		fts_report_timestamp(info);
+	}
 	input_sync(info->input_dev);
+
+	heatmap_read(&info->v4l2, info->timestamp);
 
 	pm_qos_update_request(&info->pm_qos_req, PM_QOS_DEFAULT_VALUE);
 	fts_set_bus_ref(info, FTS_BUS_REF_IRQ, false);
@@ -2976,6 +3118,15 @@ static int fts_chip_initialization(struct fts_ts_info *info, int init_type)
 }
 
 
+static irqreturn_t fts_isr(int irq, void *handle)
+{
+	struct fts_ts_info *info = handle;
+
+	info->timestamp = ktime_get_ns();
+
+	return IRQ_WAKE_THREAD;
+}
+
 /**
   * Initialize the dispatch table with the event handlers for any possible event
   * ID
@@ -3009,12 +3160,10 @@ static int fts_interrupt_install(struct fts_ts_info *info)
 	/* disable interrupts in any case */
 	error = fts_disableInterrupt();
 	if (error) {
-		pr_err("%s Failed to disable interrupts.\n",
-			 __func__);
 		return error;
 	}
 
-	error = request_threaded_irq(info->client->irq, NULL,
+	error = request_threaded_irq(info->client->irq, fts_isr,
 			fts_interrupt_handler, IRQF_ONESHOT | IRQF_TRIGGER_LOW,
 			FTS_TS_DRV_NAME, info);
 
@@ -3170,6 +3319,7 @@ static int fts_init_sensing(struct fts_ts_info *info)
 		pr_err("%s Init after Probe error (ERROR = %08X)\n",
 			__func__, error);
 
+	heatmap_enable();
 
 	return error;
 }
@@ -3410,6 +3560,9 @@ static void fts_resume_work(struct work_struct *work)
 	fts_mode_handler(info, 0);
 
 	info->sensor_sleep = false;
+
+	/* heatmap must be enabled after every chip reset (fts_system_reset) */
+	heatmap_enable();
 
 	fts_enableInterrupt();
 
@@ -3997,6 +4150,7 @@ static int fts_probe(struct spi_device *client)
 	input_set_abs_params(info->input_dev, ABS_MT_DISTANCE, DISTANCE_MIN,
 			     DISTANCE_MAX, 0, 0);
 #endif
+	input_set_capability(info->input_dev, EV_MSC, MSC_TIMESTAMP);
 
 #ifdef GESTURE_MODE
 	input_set_capability(info->input_dev, EV_KEY, KEY_WAKEUP);
@@ -4034,6 +4188,8 @@ static int fts_probe(struct spi_device *client)
 	input_set_capability(info->input_dev, EV_KEY, KEY_BACK);
 	input_set_capability(info->input_dev, EV_KEY, KEY_MENU);
 #endif
+
+	mutex_init(&info->diag_cmd_lock);
 
 	mutex_init(&(info->input_report_mutex));
 	mutex_init(&info->bus_mutex);
@@ -4095,6 +4251,26 @@ static int fts_probe(struct spi_device *client)
 		goto ProbeErrorExit_6;
 	}
 
+	/*
+	 * Heatmap_probe must be called before irq routine is registered,
+	 * because heatmap_read is called from interrupt context.
+	 * This is done as part of fwu_work.
+	 * At the same time, heatmap_probe must be done after fts_init(..) has
+	 * completed, because getForceLen() and getSenseLen() require
+	 * the chip to be initialized.
+	 */
+	info->v4l2.parent_dev = info->dev;
+	info->v4l2.input_dev = info->input_dev;
+	info->v4l2.read_frame = read_heatmap_raw;
+	info->v4l2.width = getForceLen();
+	info->v4l2.height = getSenseLen();
+	/* 120 Hz operation */
+	info->v4l2.timeperframe.numerator = 1;
+	info->v4l2.timeperframe.denominator = 120;
+	error = heatmap_probe(&info->v4l2);
+	if (error < OK)
+		goto ProbeErrorExit_6;
+
 #if defined(FW_UPDATE_ON_PROBE) && defined(FW_H_FILE)
 	pr_info("FW Update and Sensing Initialization:\n");
 	error = fts_fw_update(info);
@@ -4144,6 +4320,8 @@ ProbeErrorExit_7:
 #ifdef FW_UPDATE_ON_PROBE
 	msm_drm_unregister_client(&info->notifier);
 #endif
+
+	heatmap_remove(&info->v4l2);
 
 ProbeErrorExit_6:
 	pm_qos_remove_request(&info->pm_qos_req);
@@ -4205,6 +4383,8 @@ static int fts_remove(struct spi_device *client)
 
 	/* remove interrupt and event handlers */
 	fts_interrupt_uninstall(info);
+
+	heatmap_remove(&info->v4l2);
 
 	pm_qos_remove_request(&info->pm_qos_req);
 

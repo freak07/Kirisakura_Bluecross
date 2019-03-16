@@ -37,7 +37,6 @@
 #include <asm/uaccess.h>
 #include <asm/asm-uaccess.h>
 #include <asm/unistd.h>
-#include <asm/safestack.h>
 #include <asm/kernel-pgtable.h>
 
 /*
@@ -153,6 +152,11 @@ alternative_cb_end
 1:
 
 	mov	x29, xzr			// fp pointed to user-space
+
+#ifdef CONFIG_SHADOW_CALL_STACK
+	ldr	x18, [tsk, #TSK_TI_SCS]		// Restore shadow call stack
+	str	xzr, [tsk, #TSK_TI_SCS]
+#endif
 	.else
 	add	x21, sp, #S_FRAME_SIZE
 	get_thread_info tsk
@@ -231,6 +235,12 @@ alternative_else_nop_endif
 	.if	\el == 0
 	ct_user_enter
 	.endif
+
+#ifdef CONFIG_SHADOW_CALL_STACK
+	.if	\el == 0
+	str	x18, [tsk, #TSK_TI_SCS]		// Save shadow call stack
+	.endif
+#endif
 
 #ifdef CONFIG_ARM64_SW_TTBR0_PAN
 	/*
@@ -320,22 +330,21 @@ alternative_insn eret, nop, ARM64_UNMAP_KERNEL_AT_EL0
 	.endif
 	.endm
 
-	.macro jmp_if_not_task_stack ptr, label, tmp
-	/*
-	 * Compare \ptr with the base of the task stack.
-	 * If the top ~(THREAD_SIZE - 1) bits match, we are on a task stack.
-	 */
-	ldr	\tmp, [tsk, TSK_STACK]
-	eor	\tmp, \tmp, \ptr
-	and	\tmp, \tmp, #~(THREAD_SIZE - 1)
-	cbnz	\tmp, \label
-	.endm
-
 	.macro	irq_stack_entry
 	mov	x19, sp			// preserve the original sp
+#ifdef CONFIG_SHADOW_CALL_STACK
+	mov	x20, x18		// preserve the original shadow stack
+#endif
 
-	/* if sp points to task stack, switch to the irq stack */
-	jmp_if_not_task_stack x19, 9998f, x25
+	/*
+	 * Compare sp with the base of the task stack.
+	 * If the top ~(THREAD_SIZE - 1) bits match, we are on a task stack,
+	 * and should switch to the irq stack.
+	 */
+	ldr	x25, [tsk, TSK_STACK]
+	eor	x25, x25, x19
+	and	x25, x25, #~(THREAD_SIZE - 1)
+	cbnz	x25, 9998f
 
 	adr_this_cpu x25, irq_stack, x26
 	mov	x26, #IRQ_STACK_START_SP
@@ -344,24 +353,17 @@ alternative_insn eret, nop, ARM64_UNMAP_KERNEL_AT_EL0
 	/* switch to the irq stack */
 	mov	sp, x26
 
+#ifdef CONFIG_SHADOW_CALL_STACK
+	/* also switch to the irq shadow stack */
+	adr_this_cpu x18, irq_shadow_call_stack, x26
+#endif
+
 	/*
 	 * Add a dummy stack frame, this non-standard format is fixed up
 	 * by unwind_frame()
 	 */
 	stp     x29, x19, [sp, #-16]!
 	mov	x29, sp
-
-#ifdef CONFIG_SAFESTACK
-	/* save the task unsafe stack pointer */
-	ldr	x25, [tsk, TSK_UNSAFE_STACK_PTR]
-	str	x25, [tsk, TSK_UNSAFE_SAVED_PTR]
-
-	/* switch to the irq unsafe stack */
-	adr_this_cpu x25, irq_unsafe_stack, x26
-	mov	x26, #UNSAFE_STACK_SIZE
-	add	x26, x25, x26
-	str	x26, [tsk, TSK_UNSAFE_STACK_PTR]
-#endif
 
 9998:
 	.endm
@@ -371,17 +373,11 @@ alternative_insn eret, nop, ARM64_UNMAP_KERNEL_AT_EL0
 	 * irq_stack_exit.
 	 */
 	.macro	irq_stack_exit
-#ifdef CONFIG_SAFESTACK
-	/*
-	 * Restore the unsafe stack pointer if we are switching back to
-	 * the task stack.
-	 */
-	jmp_if_not_task_stack x19, 9999f, x25
-	ldr	x25, [tsk, TSK_UNSAFE_SAVED_PTR]
-	str	x25, [tsk, TSK_UNSAFE_STACK_PTR]
-#endif
-9999:
 	mov	sp, x19
+#ifdef CONFIG_SHADOW_CALL_STACK
+	/* x20 is also preserved */
+	mov	x18, x20
+#endif
 	.endm
 
 /*

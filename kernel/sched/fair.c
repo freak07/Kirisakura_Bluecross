@@ -6200,13 +6200,14 @@ schedtune_margin(unsigned long signal, long boost)
 	if (boost >= 0) {
 		margin  = SCHED_CAPACITY_SCALE - signal;
 		margin *= boost;
-	} else
+	} else {
 		margin = -signal * boost;
+	}
 
 	margin  = reciprocal_divide(margin, schedtune_spc_rdiv);
-
 	if (boost < 0)
 		margin *= -1;
+
 	return margin;
 }
 
@@ -6277,7 +6278,7 @@ boosted_task_util(struct task_struct *p)
 
 static unsigned long capacity_spare_wake(int cpu, struct task_struct *p)
 {
-	return capacity_orig_of(cpu) - cpu_util_wake(cpu, p);
+	return max_t(long, capacity_of(cpu) - cpu_util_wake(cpu, p), 0);
 }
 
 /*
@@ -7867,7 +7868,7 @@ preempt:
 }
 
 static struct task_struct *
-pick_next_task_fair(struct rq *rq, struct task_struct *prev, struct pin_cookie cookie)
+pick_next_task_fair(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 {
 	struct cfs_rq *cfs_rq = &rq->cfs;
 	struct sched_entity *se;
@@ -7985,9 +7986,9 @@ idle:
 	 * further scheduler activity on it and we're being very careful to
 	 * re-start the picking loop.
 	 */
-	lockdep_unpin_lock(&rq->lock, cookie);
+	rq_unpin_lock(rq, rf);
 	new_tasks = idle_balance(rq);
-	lockdep_repin_lock(&rq->lock, cookie);
+	rq_repin_lock(rq, rf);
 	/*
 	 * Because idle_balance() releases (and re-acquires) rq->lock, it is
 	 * possible for any higher priority task to appear. In that case we

@@ -418,6 +418,93 @@ static int concurrent_policy_time_seq_show(struct seq_file *m, void *v)
 	return 0;
 }
 
+static int concurrent_time_text_seq_show(struct seq_file *m, void *v,
+	atomic64_t *(*get_times)(struct concurrent_times *))
+{
+	struct uid_entry *uid_entry;
+	int i, num_possible_cpus = num_possible_cpus();
+
+	if (!uid_cpupower_enable)
+		return 0;
+
+	rcu_read_lock();
+
+	hlist_for_each_entry_rcu(uid_entry, (struct hlist_head *)v, hash) {
+		atomic64_t *times = get_times(uid_entry->concurrent_times);
+
+		seq_put_decimal_ull(m, "", (u64)uid_entry->uid);
+		seq_putc(m, ':');
+
+		for (i = 0; i < num_possible_cpus; ++i) {
+			u64 time = cputime_to_clock_t(atomic64_read(&times[i]));
+
+			seq_put_decimal_ull(m, " ", time);
+		}
+		seq_putc(m, '\n');
+	}
+
+	rcu_read_unlock();
+
+	return 0;
+}
+
+static inline atomic64_t *get_active_times(struct concurrent_times *times)
+{
+	return times->active;
+}
+
+static int concurrent_active_time_text_seq_show(struct seq_file *m, void *v)
+{
+	if (!uid_cpupower_enable)
+		return 0;
+
+	if (v == uid_hash_table) {
+		seq_put_decimal_ull(m, "cpus: ", num_possible_cpus());
+		seq_putc(m, '\n');
+	}
+
+	return concurrent_time_text_seq_show(m, v, get_active_times);
+}
+
+static inline atomic64_t *get_policy_times(struct concurrent_times *times)
+{
+	return times->policy;
+}
+
+static int concurrent_policy_time_text_seq_show(struct seq_file *m, void *v)
+{
+	int i;
+	struct cpu_freqs *freqs, *last_freqs = NULL;
+
+	if (!uid_cpupower_enable)
+		return 0;
+
+	if (v == uid_hash_table) {
+		int cnt = 0;
+		for_each_possible_cpu(i) {
+			freqs = all_freqs[i];
+			if (!freqs)
+				continue;
+			if (freqs != last_freqs) {
+				if (last_freqs) {
+					seq_put_decimal_ull(m, ": ", cnt);
+					seq_putc(m, ' ');
+					cnt = 0;
+				}
+				seq_put_decimal_ull(m, "policy", i);
+
+				last_freqs = freqs;
+			}
+			cnt++;
+		}
+		if (last_freqs) {
+			seq_put_decimal_ull(m, ": ", cnt);
+			seq_putc(m, '\n');
+		}
+	}
+	return concurrent_time_text_seq_show(m, v, get_policy_times);
+}
+
 static int uid_cpupower_enable_show(struct seq_file *m, void *v)
 {
 	seq_putc(m, uid_cpupower_enable);
@@ -450,6 +537,7 @@ static ssize_t uid_cpupower_enable_write(struct file *file,
 void cpufreq_task_times_init(struct task_struct *p)
 {
 	unsigned long flags;
+
 	spin_lock_irqsave(&task_time_in_state_lock, flags);
 	p->time_in_state = NULL;
 	spin_unlock_irqrestore(&task_time_in_state_lock, flags);
@@ -637,7 +725,7 @@ void cpufreq_acct_update_power(struct task_struct *p, cputime_t cputime)
 	uid_t uid = from_kuid_munged(current_user_ns(), task_uid(p));
 	int cpu = 0;
 
-	if (!freqs || p->flags & PF_EXITING)
+	if (!freqs || is_idle_task(p) || p->flags & PF_EXITING)
 		return;
 
 	state = freqs->offset + READ_ONCE(freqs->last_index);
@@ -858,6 +946,26 @@ static const struct file_operations concurrent_active_time_fops = {
 	.release	= seq_release,
 };
 
+static const struct seq_operations concurrent_active_time_text_seq_ops = {
+	.start = uid_seq_start,
+	.next = uid_seq_next,
+	.stop = uid_seq_stop,
+	.show = concurrent_active_time_text_seq_show,
+};
+
+static int concurrent_active_time_text_open(struct inode *inode,
+					    struct file *file)
+{
+	return seq_open(file, &concurrent_active_time_text_seq_ops);
+}
+
+static const struct file_operations concurrent_active_time_text_fops = {
+	.open		= concurrent_active_time_text_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= seq_release,
+};
+
 static const struct seq_operations concurrent_policy_time_seq_ops = {
 	.start = uid_seq_start,
 	.next = uid_seq_next,
@@ -872,6 +980,26 @@ static int concurrent_policy_time_open(struct inode *inode, struct file *file)
 
 static const struct file_operations concurrent_policy_time_fops = {
 	.open		= concurrent_policy_time_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= seq_release,
+};
+
+static const struct seq_operations concurrent_policy_time_text_seq_ops = {
+	.start = uid_seq_start,
+	.next = uid_seq_next,
+	.stop = uid_seq_stop,
+	.show = concurrent_policy_time_text_seq_show,
+};
+
+static int concurrent_policy_time_text_open(struct inode *inode,
+					    struct file *file)
+{
+	return seq_open(file, &concurrent_policy_time_text_seq_ops);
+}
+
+static const struct file_operations concurrent_policy_time_text_fops = {
+	.open		= concurrent_policy_time_text_open,
 	.read		= seq_read,
 	.llseek		= seq_lseek,
 	.release	= seq_release,
@@ -895,6 +1023,12 @@ static int __init cpufreq_times_init(void)
 
 	proc_create_data("uid_time_in_state", 0444, NULL,
 			 &uid_time_in_state_fops, NULL);
+
+	proc_create_data("uid_concurrent_active_time", 0444, NULL,
+			 &concurrent_active_time_text_fops, NULL);
+
+	proc_create_data("uid_concurrent_policy_time", 0444, NULL,
+			 &concurrent_policy_time_text_fops, NULL);
 
 	uid_cpupower = proc_mkdir("uid_cpupower", NULL);
 	if (!uid_cpupower) {

@@ -331,7 +331,7 @@ int pil_do_ramdump(struct pil_desc *desc,
 }
 EXPORT_SYMBOL(pil_do_ramdump);
 
-int __nosafestack pil_assign_mem_to_subsys(struct pil_desc *desc, phys_addr_t addr,
+int pil_assign_mem_to_subsys(struct pil_desc *desc, phys_addr_t addr,
 							size_t size)
 {
 	int ret;
@@ -347,7 +347,7 @@ int __nosafestack pil_assign_mem_to_subsys(struct pil_desc *desc, phys_addr_t ad
 }
 EXPORT_SYMBOL(pil_assign_mem_to_subsys);
 
-int __nosafestack pil_assign_mem_to_linux(struct pil_desc *desc, phys_addr_t addr,
+int pil_assign_mem_to_linux(struct pil_desc *desc, phys_addr_t addr,
 							size_t size)
 {
 	int ret;
@@ -364,7 +364,7 @@ int __nosafestack pil_assign_mem_to_linux(struct pil_desc *desc, phys_addr_t add
 }
 EXPORT_SYMBOL(pil_assign_mem_to_linux);
 
-int __nosafestack pil_assign_mem_to_subsys_and_linux(struct pil_desc *desc,
+int pil_assign_mem_to_subsys_and_linux(struct pil_desc *desc,
 						phys_addr_t addr, size_t size)
 {
 	int ret;
@@ -381,7 +381,7 @@ int __nosafestack pil_assign_mem_to_subsys_and_linux(struct pil_desc *desc,
 }
 EXPORT_SYMBOL(pil_assign_mem_to_subsys_and_linux);
 
-int __nosafestack pil_reclaim_mem(struct pil_desc *desc, phys_addr_t addr, size_t size,
+int pil_reclaim_mem(struct pil_desc *desc, phys_addr_t addr, size_t size,
 						int VMid)
 {
 	int ret;
@@ -845,6 +845,12 @@ static int pil_load_seg(struct pil_desc *desc, struct pil_seg *seg)
 			(pil_retry_count < PERIPHERAL_LOADER_MAX_RETRY)) {
 			pil_err(desc, "Failed to locate blob %s, retry: %d\n",
 				fw_name, pil_retry_count++);
+			firmware_buf = desc->map_fw_mem(seg->paddr, seg->filesz,
+							map_data);
+			if (!firmware_buf) {
+				pil_err(desc, "Failed to map memory for firmware buffer\n");
+				return -ENOMEM;
+			}
 			ret = request_firmware_into_buf(&fw, fw_name, desc->dev,
 						firmware_buf, seg->filesz);
 			desc->unmap_fw_mem(firmware_buf, seg->filesz, map_data);

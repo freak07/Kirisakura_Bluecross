@@ -543,6 +543,9 @@ static int smblib_request_dpdm(struct smb_charger *chg, bool enable)
 {
 	int rc = 0;
 
+	if (chg->pr_swap_in_progress)
+		return 0;
+
 	/* fetch the DPDM regulator */
 	if (!chg->dpdm_reg && of_get_property(chg->dev->of_node,
 				"dpdm-supply", NULL)) {
@@ -1175,9 +1178,8 @@ static int __smblib_set_prop_typec_power_role(struct smb_charger *chg,
 
 	rc = smblib_masked_write(chg, TYPE_C_CFG_2_REG,
 				 EN_80UA_180UA_CUR_SOURCE_BIT,
-				 power_role == POWER_SUPPLY_TYPEC_PR_SOURCE_1_5
-				 ? EN_80UA_180UA_CUR_SOURCE_BIT : 0);
-
+				 val->intval == POWER_SUPPLY_TYPEC_PR_SOURCE
+				 ? 0 : EN_80UA_180UA_CUR_SOURCE_BIT);
 	if (rc < 0)
 		smblib_err(chg, "Couldnt update EN_ISRC_180UA_BIT rc=%d\n", rc);
 
@@ -3122,6 +3124,7 @@ static int __smblib_set_prop_pd_active(struct smb_charger *chg, bool pd_active)
 
 	chg->pd_active = pd_active;
 	if (chg->pd_active) {
+		chg->real_charger_type = POWER_SUPPLY_TYPE_USB_PD;
 		vote(chg->apsd_disable_votable, PD_VOTER, true, 0);
 		vote(chg->pd_allowed_votable, PD_VOTER, true, 0);
 		vote(chg->usb_irq_enable_votable, PD_VOTER, true, 0);
@@ -4092,8 +4095,8 @@ static void smblib_force_legacy_icl(struct smb_charger *chg, int pst)
 		vote(chg->usb_icl_votable, LEGACY_UNKNOWN_VOTER, true, 3000000);
 		break;
 	default:
-		smblib_err(chg, "Unknown APSD %d; forcing 500mA\n", pst);
-		vote(chg->usb_icl_votable, LEGACY_UNKNOWN_VOTER, true, 500000);
+		smblib_err(chg, "Unknown APSD %d; forcing suspend\n", pst);
+		vote(chg->usb_icl_votable, LEGACY_UNKNOWN_VOTER, true, 0);
 		break;
 	}
 }
@@ -4460,7 +4463,7 @@ static void smblib_handle_typec_removal(struct smb_charger *chg)
 	cancel_delayed_work_sync(&chg->hvdcp_detect_work);
 
 	/* reset input current limit voters */
-	vote(chg->usb_icl_votable, LEGACY_UNKNOWN_VOTER, true, 100000);
+	vote(chg->usb_icl_votable, LEGACY_UNKNOWN_VOTER, true, 0);
 	vote(chg->usb_icl_votable, PD_VOTER, false, 0);
 	vote(chg->usb_icl_votable, USB_PSY_VOTER, false, 0);
 	vote(chg->usb_icl_votable, DCP_VOTER, false, 0);

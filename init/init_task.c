@@ -7,7 +7,7 @@
 #include <linux/init.h>
 #include <linux/fs.h>
 #include <linux/mm.h>
-#include <linux/safestack.h>
+#include <linux/scs.h>
 
 #include <asm/pgtable.h>
 #include <asm/uaccess.h>
@@ -15,9 +15,9 @@
 static struct signal_struct init_signals = INIT_SIGNALS(init_signals);
 static struct sighand_struct init_sighand = INIT_SIGHAND(init_sighand);
 
-#ifdef CONFIG_SAFESTACK
-static unsigned long init_unsafe_stack[UNSAFE_STACK_SIZE / sizeof(long)]
-	__init_task_data __aligned(UNSAFE_STACK_ALIGN);
+#ifdef CONFIG_SHADOW_CALL_STACK
+unsigned long init_shadow_call_stack[SCS_SIZE / sizeof(long)]
+	__init_task_data __aligned(SCS_SIZE);
 #endif
 
 /* Initial task structure */

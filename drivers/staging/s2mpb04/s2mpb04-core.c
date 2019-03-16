@@ -47,6 +47,12 @@
 /* defines the timeout in jiffies for ADC conversion completion */
 #define S2MPB04_ADC_CONV_TIMEOUT  msecs_to_jiffies(100)
 
+/* defines the number of tries to recover chip */
+#define S2MPB04_RECOVER_RETRY_COUNT 3
+
+static int s2mpb04_pdn_seq_en(struct s2mpb04_core *ddata);
+static int s2mpb04_pdn_seq_dis(struct s2mpb04_core *ddata);
+static int s2mpb04_prepare_pon(struct s2mpb04_core *ddata);
 static int s2mpb04_chip_init(struct s2mpb04_core *ddata);
 static int s2mpb04_core_fixup(struct s2mpb04_core *ddata);
 static void s2mpb04_print_status(struct s2mpb04_core *ddata);
@@ -60,10 +66,16 @@ static const struct mfd_cell s2mpb04_devs[] = {
 		.name = "s2mpb04-gpio",
 		.of_compatible = "samsung,s2mpb04-gpio",
 	},
+	/*
+	 * Disable s2mpb04 thermal zone to reduce overall i2c xfer.
+	 * See b/122984225.
+	 */
+#if 0
 	{
 		.name = "s2mpb04-thermal",
 		.of_compatible = "samsung,s2mpb04-thermal",
 	},
+#endif
 };
 
 static const struct regmap_config s2mpb04_regmap_config = {
@@ -79,7 +91,17 @@ int s2mpb04_toggle_pon(struct s2mpb04_core *ddata)
 
 	reinit_completion(&ddata->init_complete);
 
+	/* disable hardware sequence when SW is initiating power-down.
+	 * hw-driven power-down sequence is required only in case of a
+	 * TSD event and has 4ms extra latency.
+	 */
+	s2mpb04_pdn_seq_dis(ddata);
+
 	gpio_set_value_cansleep(ddata->pdata->pon_gpio, 0);
+
+	/* force state machine in low power state */
+	s2mpb04_prepare_pon(ddata);
+
 	usleep_range(20, 25);
 	gpio_set_value_cansleep(ddata->pdata->pon_gpio, 1);
 
@@ -94,6 +116,28 @@ int s2mpb04_toggle_pon(struct s2mpb04_core *ddata)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(s2mpb04_toggle_pon);
+
+/* When chip is hung resetb is stuck high. Function to toggle PON to recover
+ * the chip but don't wait for resetb transition
+ */
+int s2mpb04_toggle_pon_no_resetb_wait(struct s2mpb04_core *ddata)
+{
+	dev_dbg(ddata->dev, "%s: toggling PON\n", __func__);
+
+	gpio_set_value_cansleep(ddata->pdata->pon_gpio, 0);
+
+	/* force state machine in low power state */
+	s2mpb04_prepare_pon(ddata);
+
+	usleep_range(20, 25);
+	gpio_set_value_cansleep(ddata->pdata->pon_gpio, 1);
+
+	/* give the chip some time to power on */
+	msleep(S2MPB04_PON_RESET_DELAY);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(s2mpb04_toggle_pon_no_resetb_wait);
 
 int s2mpb04_dump_regs(struct s2mpb04_core *ddata)
 {
@@ -133,7 +177,6 @@ int s2mpb04_read_byte(struct s2mpb04_core *ddata, u8 addr, u8 *data)
 
 	dev_err(ddata->dev, "%s: failed with %d retries, power cycling device\n",
 		__func__, S2MPB04_I2C_RETRY_COUNT);
-	s2mpb04_toggle_pon(ddata);
 
 	return -EIO;
 }
@@ -156,7 +199,6 @@ int s2mpb04_read_bytes(struct s2mpb04_core *ddata, u8 addr, u8 *data,
 
 	dev_err(ddata->dev, "%s: failed with %d retries, power cycling device\n",
 		__func__, S2MPB04_I2C_RETRY_COUNT);
-	s2mpb04_toggle_pon(ddata);
 
 	return -EIO;
 }
@@ -179,7 +221,6 @@ int s2mpb04_write_byte(struct s2mpb04_core *ddata, u8 addr, u8 data)
 
 	dev_err(ddata->dev, "%s: failed with %d retries, power cycling device\n",
 		__func__, S2MPB04_I2C_RETRY_COUNT);
-	s2mpb04_toggle_pon(ddata);
 
 	return -EIO;
 }
@@ -203,7 +244,6 @@ int s2mpb04_write_bytes(struct s2mpb04_core *ddata, u8 addr, u8 *data,
 
 	dev_err(ddata->dev, "%s: failed with %d retries, power cycling device\n",
 		__func__, S2MPB04_I2C_RETRY_COUNT);
-	s2mpb04_toggle_pon(ddata);
 
 	return -EIO;
 }
@@ -227,7 +267,6 @@ int s2mpb04_update_bits(struct s2mpb04_core *ddata, u8 addr,
 
 	dev_err(ddata->dev, "%s: failed with %d retries, power cycling device\n",
 		__func__, S2MPB04_I2C_RETRY_COUNT);
-	s2mpb04_toggle_pon(ddata);
 
 	return -EIO;
 }
@@ -275,6 +314,11 @@ int s2mpb04_read_adc_chan(struct s2mpb04_core *ddata,
 	dev_dbg(ddata->dev, "%s: chan_data 0x%02x\n", __func__, *chan_data);
 
 adc_cleanup:
+
+	/* set ADC muxsel to 0 (no monitoring). This is a workaround to prevent
+	 * disabling ADC when it's connected to temperature sensor */
+	s2mpb04_write_byte(ddata, S2MPB04_REG_MUXSEL1, 0x0);
+
 	/*
 	 * Disable thermal shutdown when disabling the ADC. This is a workaround
 	 * for a silicon bug that causes thermal shutdown comparator input to be
@@ -409,7 +453,6 @@ static int s2mpb04_handle_int(struct s2mpb04_core *ddata,
 		NOTIFY(S2MPB04_ID_SMPS2, REGULATOR_EVENT_FAIL);
 		NOTIFY(S2MPB04_ID_LDO2, REGULATOR_EVENT_FAIL);
 		NOTIFY(S2MPB04_ID_LDO1, REGULATOR_EVENT_FAIL);
-		s2mpb04_print_status(ddata);
 		break;
 
 	default:
@@ -455,12 +498,13 @@ static int s2mpb04_check_int_flags(struct s2mpb04_core *ddata)
 	return ret;
 }
 
-/* kernel thread for waiting for chip to come out of reset */
+/* kernel thread to notify regulator fail event and clear any pending
+ * interrupt status
+ */
 static void s2mpb04_reset_work(struct work_struct *data)
 {
 	struct s2mpb04_core *ddata = container_of(data, struct s2mpb04_core,
 						   reset_work);
-	unsigned long timeout;
 
 	/* notify regulators of shutdown event */
 	dev_err(ddata->dev,
@@ -469,38 +513,118 @@ static void s2mpb04_reset_work(struct work_struct *data)
 	NOTIFY(S2MPB04_ID_SMPS2, REGULATOR_EVENT_FAIL);
 	NOTIFY(S2MPB04_ID_LDO1, REGULATOR_EVENT_FAIL);
 	NOTIFY(S2MPB04_ID_LDO2, REGULATOR_EVENT_FAIL);
+}
 
-	dev_err(ddata->dev,
-		"%s: waiting for chip to come out of reset\n", __func__);
+/* kernel thread to detect if PMIC is hung and run the recovery sequence */
+static void s2mpb04_recover_work(struct work_struct *data)
+{
+	struct s2mpb04_core *ddata = container_of(data, struct s2mpb04_core,
+						  recover_work);
+	struct s2mpb04_platform_data *pdata = ddata->pdata;
+	struct device *dev = ddata->dev;
+	unsigned long timeout;
 
-	/* initialize chip */
-	s2mpb04_chip_init(ddata);
+	/* disable interrupts during recovery sequence */
+	disable_irq(pdata->resetb_irq);
+	disable_irq(pdata->intb_irq);
 
-	/* wait for chip to come out of reset, signaled by resetb interrupt */
-	timeout = wait_for_completion_timeout(&ddata->reset_complete,
+	/* when chip is hung resetb is stuck high. Toggle PON to recover chip
+	 * but don't wait for resetb transition
+	 */
+	s2mpb04_toggle_pon_no_resetb_wait(ddata);
+
+	/* check if recovery sequence worked. resetb should now become low
+	 * when PON is low
+	 */
+	gpio_set_value_cansleep(pdata->pon_gpio, 0);
+	usleep_range(100, 105);
+
+	/* re-enable interrupts */
+	enable_irq(pdata->resetb_irq);
+	enable_irq(pdata->intb_irq);
+
+	if (gpio_get_value(pdata->resetb_gpio)) {
+		dev_err(dev, "%s: recovery sequence failed", __func__);
+		return;
+	}
+
+	dev_info(dev, "%s: recovery sequence success", __func__);
+
+	gpio_set_value_cansleep(ddata->pdata->pon_gpio, 1);
+
+	/* wait for chip to come out of reset and get initialized,
+	 * signaled by resetb interrupt handler
+	 */
+	timeout = wait_for_completion_timeout(&ddata->init_complete,
 					      S2MPB04_SHUTDOWN_RESET_TIMEOUT);
 	if (!timeout)
 		dev_err(ddata->dev,
 			"%s: timeout waiting for device to return from reset\n",
 			__func__);
-	else
-		s2mpb04_core_fixup(ddata);
-
-	complete(&ddata->init_complete);
 }
 
-/* irq handler for resetb pin */
+/* check if chip is hung */
+static bool s2mpb04_is_chip_hung(struct s2mpb04_core *ddata)
+{
+	int ret;
+	u8 chan_data;
+
+	/* Detect if chip is hung by reading ADC */
+	do {
+		ret = s2mpb04_read_adc_chan(ddata,
+					    S2MPB04_ADC_VBAT,
+					    &chan_data);
+	} while (ret == -EAGAIN);
+
+	/* chip is hung if ADC read timesout or raw vbat data
+	 * is 0x10
+	 */
+	return ((ret == -ETIMEDOUT) || (chan_data == 0x10));
+}
+
+/* irq handler for resetb pin.
+ * It may not catch falling edge. But, that will not be an issue as intb
+ * interrupt handler will notify regulator fail event.
+ */
 static irqreturn_t s2mpb04_resetb_irq_handler(int irq, void *cookie)
 {
 	struct s2mpb04_core *ddata = (struct s2mpb04_core *)cookie;
+	struct device *dev = ddata->dev;
+	bool is_chip_hung;
 
 	if (gpio_get_value(ddata->pdata->resetb_gpio)) {
-		dev_dbg(ddata->dev, "%s: completing reset\n", __func__);
-		complete(&ddata->reset_complete);
+		dev_dbg(dev, "%s: completing reset\n", __func__);
+
+		/* initialize chip */
+		s2mpb04_chip_init(ddata);
+
+		/* check if chip is hung */
+		is_chip_hung = s2mpb04_is_chip_hung(ddata);
+
+		if (!is_chip_hung) {
+			/* Fixup some chip settings that are different than
+			 * reset values.
+			 */
+			s2mpb04_core_fixup(ddata);
+
+			complete(&ddata->init_complete);
+
+			/* clear recovery attempt counter */
+			ddata->recover_count = 0;
+		} else if (ddata->recover_count < S2MPB04_RECOVER_RETRY_COUNT) {
+			dev_err(dev,
+				"%s: lockup detected, trying recovery: (%d/%d)",
+				__func__,
+				(int)++ddata->recover_count,
+				S2MPB04_RECOVER_RETRY_COUNT);
+			schedule_work(&ddata->recover_work);
+		} else {
+			dev_err(dev, "%s: max recovery attempts reached: %d",
+				__func__, S2MPB04_RECOVER_RETRY_COUNT);
+		}
 	} else {
-		dev_err(ddata->dev, "%s: device reset\n", __func__);
+		dev_err(dev, "%s: device reset\n", __func__);
 		reinit_completion(&ddata->init_complete);
-		reinit_completion(&ddata->reset_complete);
 		schedule_work(&ddata->reset_work);
 	}
 
@@ -585,6 +709,63 @@ static int s2mpb04_core_fixup(struct s2mpb04_core *ddata)
 	/* disable watchdog timer */
 	s2mpb04_write_byte(ddata, S2MPB04_REG_WTSR_CTRL, 0x1D);
 
+	/* Disable temprature compensation. This is a workaround to prevent
+	 * disabling ADC when it's connected to temperature sensor */
+	s2mpb04_write_byte(ddata, S2MPB04_REG_ADC_CTRL2, 0x5);
+
+	/* enable hardware power-down sequence */
+	s2mpb04_pdn_seq_en(ddata);
+
+	return 0;
+}
+
+/* Enable hardware power down sequence.
+ * PMIC state machine locks up when BGROK drops low in Standby state.
+ * When hardware power down sequence is enabled, on TSD event,
+ * PMIC state machine will first go to power-down state before
+ * going to low-power state. This will make BGROK to drop low
+ * on power-down -> low-power state transition and will prevent
+ * the lockup.
+ */
+static int s2mpb04_pdn_seq_en(struct s2mpb04_core *ddata)
+{
+	dev_dbg(ddata->dev, "%s: enable power down sequence\n",
+		__func__);
+
+	s2mpb04_write_byte(ddata, S2MPB04_REG_OFF_SEQ_CTRL, 0x80);
+	s2mpb04_write_byte(ddata, S2MPB04_REG_SEQ1, 0x44);
+	s2mpb04_write_byte(ddata, S2MPB04_REG_SEQ2, 0x44);
+
+	return 0;
+}
+
+/* Disable hardware power down sequence */
+static int s2mpb04_pdn_seq_dis(struct s2mpb04_core *ddata)
+{
+	dev_dbg(ddata->dev, "%s: disable power down sequence\n",
+		__func__);
+
+	s2mpb04_write_byte(ddata, S2MPB04_REG_OFF_SEQ_CTRL, 0x0);
+
+	return 0;
+}
+
+/* Force state machine in low power state. This should be state machine's
+ * state when PON=0 and BUV (battery under volatge)=0. But, when LDO OI
+ * issue happens, it's stuck in power-down state.
+ *
+ * In low power state, PON 0 -> 1 toggle will initiate power-up sequence
+ * and reload register values from OTP. So, this function should be called
+ * when PON is set to 0.
+ */
+static int s2mpb04_prepare_pon(struct s2mpb04_core *ddata)
+{
+	dev_info(ddata->dev, "%s: applying workaround for LDO OI issue\n",
+		 __func__);
+
+	s2mpb04_write_byte(ddata, S2MPB04_REG_SEQ1, 0x66);
+	s2mpb04_write_byte(ddata, S2MPB04_REG_SEQ2, 0x66);
+
 	return 0;
 }
 
@@ -632,10 +813,10 @@ static int s2mpb04_probe(struct i2c_client *client,
 
 	/* initialize some structures */
 	INIT_WORK(&ddata->reset_work, s2mpb04_reset_work);
+	INIT_WORK(&ddata->recover_work, s2mpb04_recover_work);
 
 	/* initialize completions */
 	init_completion(&ddata->init_complete);
-	init_completion(&ddata->reset_complete);
 	init_completion(&ddata->adc_conv_complete);
 
 	/* initialize regmap */
@@ -655,21 +836,16 @@ static int s2mpb04_probe(struct i2c_client *client,
 			      "S2MPB04 RESETB");
 	devm_gpio_request_one(dev, pdata->intb_gpio, GPIOF_IN,
 			      "S2MPB04 INTB");
-	ret = devm_request_threaded_irq(dev, pdata->resetb_irq, NULL,
-					s2mpb04_resetb_irq_handler,
-					IRQF_TRIGGER_FALLING |
-					IRQF_TRIGGER_RISING | IRQF_ONESHOT,
-					"s2mpb04-resetb", ddata);
 	ret = devm_request_threaded_irq(dev, pdata->intb_irq, NULL,
 					s2mpb04_intb_irq_handler,
 					IRQF_TRIGGER_FALLING | IRQF_ONESHOT,
 					"s2mpb04-intb", ddata);
 
-	/* disable the irq while doing initial power on */
-	disable_irq(pdata->resetb_irq);
-
 	/* initialize chip */
 	s2mpb04_chip_init(ddata);
+
+	/* force state machine in low power state */
+	s2mpb04_prepare_pon(ddata);
 
 	for (i = 0; i < S2MPB04_PON_RETRY_CNT; i++) {
 		dev_dbg(dev, "%s: powering on s2mpb04\n", __func__);
@@ -705,8 +881,14 @@ static int s2mpb04_probe(struct i2c_client *client,
 	/* create sysfs attributes */
 	s2mpb04_config_sysfs(dev);
 
-	/* enable the irq after power on */
-	enable_irq(pdata->resetb_irq);
+	/* Register resetb irq handler after setting PON to avoid IRQ
+	 * firing unnecessarily.
+	 */
+	ret = devm_request_threaded_irq(dev, pdata->resetb_irq, NULL,
+					s2mpb04_resetb_irq_handler,
+					IRQF_TRIGGER_FALLING |
+					IRQF_TRIGGER_RISING | IRQF_ONESHOT,
+					"s2mpb04-resetb", ddata);
 
 	/* fixup some chip settings that are different than reset values */
 	s2mpb04_core_fixup(ddata);

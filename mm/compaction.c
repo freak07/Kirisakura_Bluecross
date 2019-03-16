@@ -20,6 +20,7 @@
 #include <linux/kthread.h>
 #include <linux/freezer.h>
 #include <linux/page_owner.h>
+#include <linux/psi.h>
 #include "internal.h"
 
 #ifdef CONFIG_COMPACTION
@@ -1507,6 +1508,7 @@ static enum compact_result compact_zone(struct zone *zone, struct compact_contro
 	unsigned long end_pfn = zone_end_pfn(zone);
 	const int migratetype = gfpflags_to_migratetype(cc->gfp_mask);
 	const bool sync = cc->mode != MIGRATE_ASYNC;
+	ktime_t event_ts;
 
 	ret = compaction_suitable(zone, cc->order, cc->alloc_flags,
 							cc->classzone_idx);
@@ -1552,6 +1554,7 @@ static enum compact_result compact_zone(struct zone *zone, struct compact_contro
 
 	cc->last_migrated_pfn = 0;
 
+	mm_event_start(&event_ts);
 	trace_mm_compaction_begin(start_pfn, cc->migrate_pfn,
 				cc->free_pfn, end_pfn, sync);
 
@@ -1637,6 +1640,7 @@ check_drain:
 	}
 
 out:
+	mm_event_end(MM_COMPACTION, event_ts);
 	/*
 	 * Release free pages and update where the free scanner should restart,
 	 * so we don't leave any returned pages behind in the next attempt.
@@ -1714,11 +1718,13 @@ enum compact_result try_to_compact_pages(gfp_t gfp_mask, unsigned int order,
 	struct zoneref *z;
 	struct zone *zone;
 	enum compact_result rc = COMPACT_SKIPPED;
+	ktime_t event_ts;
 
 	/* Check if the GFP flags allow compaction */
 	if (!may_enter_fs || !may_perform_io)
 		return COMPACT_SKIPPED;
 
+	mm_event_start(&event_ts);
 	trace_mm_compaction_try_to_compact_pages(order, gfp_mask, prio);
 
 	/* Compact each zone in the list */
@@ -1768,6 +1774,7 @@ enum compact_result try_to_compact_pages(gfp_t gfp_mask, unsigned int order,
 			break;
 	}
 
+	mm_event_end(MM_COMPACTION, event_ts);
 	return rc;
 }
 
@@ -2005,11 +2012,15 @@ static int kcompactd(void *p)
 	pgdat->kcompactd_classzone_idx = pgdat->nr_zones - 1;
 
 	while (!kthread_should_stop()) {
+		unsigned long pflags;
+
 		trace_mm_compaction_kcompactd_sleep(pgdat->node_id);
 		wait_event_freezable(pgdat->kcompactd_wait,
 				kcompactd_work_requested(pgdat));
 
+		psi_memstall_enter(&pflags);
 		kcompactd_do_work(pgdat);
+		psi_memstall_leave(&pflags);
 	}
 
 	return 0;

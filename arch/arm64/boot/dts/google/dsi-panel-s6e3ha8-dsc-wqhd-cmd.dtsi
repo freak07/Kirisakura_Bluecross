@@ -129,11 +129,6 @@
 					15 01 00 00 00 00 02 53 20
 				];
 
-				qcom,mdss-dsi-nohbm-command = [
-					/* Disable high brightness */
-					15 01 00 00 00 00 02 53 20
-				];
-
 				qcom,compression-mode = "dsc";
 				qcom,mdss-dsc-slice-height = <40>;
 				qcom,mdss-dsc-slice-width = <720>;
@@ -191,16 +186,41 @@
 		};
 
 		google,hbm-ranges {
-			hbm-range@0 {
-				google,dsi-hbm-brightness-threshold = <1>;
+			google,dsi-hbm-exit-command = [
+				/* Disable high brightness and enable
+				 * brightness dimming
+				 */
+				15 01 00 00 00 00 02 53 28
+			];
+			google,dsi-hbm-exit-num-dimming-frames = <32>;
+			google,dsi-hbm-exit-dimming-stop-command = [
+				/* Disable high brightness and disable
+				 * brightness dimming
+				 */
+				15 01 00 00 00 00 02 53 20
+			];
+			google,dsi-hbm-commands-state = "dsi_lp_mode";
 
-				google,dsi-bl-hbm-min-level = <0x5>;
-				google,dsi-bl-hbm-max-level = <0x3ff>;
+			hbm-range@0 {
+				google,dsi-hbm-range-brightness-threshold = <1>;
+
+				google,dsi-hbm-range-bl-min-level = <0x5>;
+				google,dsi-hbm-range-bl-max-level = <0x3ff>;
 				google,dsi-hbm-range-entry-command = [
-					/* Disable high brightness */
+					/* Disable high brightness and enable
+					 * brightness dimming
+					 */
+					15 01 00 00 00 00 02 53 28
+				];
+				google,dsi-hbm-range-num-dimming-frames = <32>;
+				google,dsi-hbm-range-dimming-stop-command = [
+					/* Disable high brightness and disable
+					 * brightness dimming
+					 */
 					15 01 00 00 00 00 02 53 20
 				];
-				google,dsi-hbm-commands-state = "dsi_lp_mode";
+				google,dsi-hbm-range-commands-state =
+					"dsi_lp_mode";
 			};
 
 			hbm-range@1 {
@@ -213,15 +233,26 @@
 				 * brightness 170. Panel brightness is not
 				 * adjustable in the 400-600 nit segment.
 				 */
-				google,dsi-hbm-brightness-threshold = <170>;
+				google,dsi-hbm-range-brightness-threshold =
+					<170>;
 
-				google,dsi-bl-hbm-min-level = <0x3ff>;
-				google,dsi-bl-hbm-max-level = <0x3ff>;
+				google,dsi-hbm-range-bl-min-level = <0x3ff>;
+				google,dsi-hbm-range-bl-max-level = <0x3ff>;
+
 				google,dsi-hbm-range-entry-command = [
 					/* Enable high brightness */
+					15 01 00 00 00 00 02 53 E8
+				];
+				google,dsi-hbm-range-num-dimming-frames = <32>;
+				google,dsi-hbm-range-dimming-stop-command = [
+					/* Enable high brightness and disable
+					 * brightness dimming
+					 */
 					15 01 00 00 00 00 02 53 E0
 				];
-				google,dsi-hbm-commands-state = "dsi_lp_mode";
+
+				google,dsi-hbm-range-commands-state =
+					"dsi_lp_mode";
 			};
 		};
 	};

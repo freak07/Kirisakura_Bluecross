@@ -77,8 +77,8 @@
 #include <linux/compiler.h>
 #include <linux/sysctl.h>
 #include <linux/kcov.h>
-#include <linux/safestack.h>
 #include <linux/cpufreq_times.h>
+#include <linux/scs.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -328,7 +328,6 @@ static void release_task_stack(struct task_struct *tsk)
 	account_kernel_stack(tsk, -1);
 	arch_release_thread_stack(tsk->stack);
 	free_thread_stack(tsk);
-	free_unsafe_stack(tsk);
 	tsk->stack = NULL;
 #ifdef CONFIG_VMAP_STACK
 	tsk->stack_vm_area = NULL;
@@ -345,6 +344,9 @@ void put_task_stack(struct task_struct *tsk)
 
 void free_task(struct task_struct *tsk)
 {
+	scs_release(tsk);
+	cpufreq_task_times_exit(tsk);
+
 #ifndef CONFIG_THREAD_INFO_IN_TASK
 	/*
 	 * The task is finally done with both the stack and thread_info,
@@ -357,9 +359,6 @@ void free_task(struct task_struct *tsk)
 	 * by now.
 	 */
 	WARN_ON_ONCE(atomic_read(&tsk->stack_refcount) != 0);
-#endif
-#ifdef CONFIG_CPU_FREQ_TIMES
-	cpufreq_task_times_exit(tsk);
 #endif
 	rt_mutex_debug_task_free(tsk);
 	ftrace_graph_exit_task(tsk);
@@ -462,8 +461,6 @@ void __init fork_init(void)
 	for (i = 0; i < UCOUNT_COUNTS; i++) {
 		init_user_ns.ucount_max[i] = max_threads/2;
 	}
-
-	init_unsafe_stack_cache();
 }
 
 int __weak arch_dup_task_struct(struct task_struct *dst,
@@ -479,8 +476,6 @@ void set_task_stack_end_magic(struct task_struct *tsk)
 
 	stackend = end_of_stack(tsk);
 	*stackend = STACK_END_MAGIC;	/* for overflow detection */
-
-	set_unsafe_stack_end_magic(tsk);
 }
 
 static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
@@ -520,10 +515,7 @@ static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
 #ifdef CONFIG_THREAD_INFO_IN_TASK
 	atomic_set(&tsk->stack_refcount, 1);
 #endif
-	if (err)
-		goto free_stack;
 
-	err = alloc_unsafe_stack(tsk, node);
 	if (err)
 		goto free_stack;
 
@@ -541,6 +533,7 @@ static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
 	clear_user_return_notifier(tsk);
 	clear_tsk_need_resched(tsk);
 	set_task_stack_end_magic(tsk);
+	scs_task_init(tsk);
 
 #ifdef CONFIG_CC_STACKPROTECTOR
 	tsk->stack_canary = get_random_long();
@@ -566,7 +559,6 @@ static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
 
 free_stack:
 	free_thread_stack(tsk);
-	free_unsafe_stack(tsk);
 free_tsk:
 	free_task_struct(tsk);
 	return NULL;
@@ -1196,6 +1188,7 @@ static int copy_mm(unsigned long clone_flags, struct task_struct *tsk)
 
 	tsk->min_flt = tsk->maj_flt = 0;
 	tsk->nvcsw = tsk->nivcsw = 0;
+	mm_event_task_init(tsk);
 #ifdef CONFIG_DETECT_HUNG_TASK
 	tsk->last_switch_count = tsk->nvcsw + tsk->nivcsw;
 #endif
@@ -1550,6 +1543,8 @@ static __latent_entropy struct task_struct *copy_process(
 	if (!p)
 		goto fork_out;
 
+	cpufreq_task_times_init(p);
+
 	/*
 	 * This _must_ happen before we call free_task(), i.e. before we jump
 	 * to any of the bad_fork_* labels. This is to avoid freeing
@@ -1561,10 +1556,6 @@ static __latent_entropy struct task_struct *copy_process(
 	 * Clear TID on mm_release()?
 	 */
 	p->clear_child_tid = (clone_flags & CLONE_CHILD_CLEARTID) ? child_tidptr : NULL;
-
-#ifdef CONFIG_CPU_FREQ_TIMES
-	cpufreq_task_times_init(p);
-#endif
 
 	ftrace_graph_init_task(p);
 
@@ -1622,6 +1613,10 @@ static __latent_entropy struct task_struct *copy_process(
 #endif
 
 	p->default_timer_slack_ns = current->timer_slack_ns;
+
+#ifdef CONFIG_PSI
+	p->psi_flags = 0;
+#endif
 
 	task_io_accounting_init(&p->ioac);
 	acct_clear_integrals(p);
@@ -1716,6 +1711,9 @@ static __latent_entropy struct task_struct *copy_process(
 	retval = copy_thread_tls(clone_flags, stack_start, stack_size, p, tls);
 	if (retval)
 		goto bad_fork_cleanup_io;
+	retval = scs_prepare(p, node);
+	if (retval)
+		goto bad_fork_cleanup_thread;
 
 	if (pid != &init_struct_pid) {
 		pid = alloc_pid(p->nsproxy->pid_ns_for_children);
@@ -2006,6 +2004,8 @@ long _do_fork(unsigned long clone_flags,
 	if (!IS_ERR(p)) {
 		struct completion vfork;
 		struct pid *pid;
+
+		cpufreq_task_times_alloc(p);
 
 		trace_sched_process_fork(current, p);
 

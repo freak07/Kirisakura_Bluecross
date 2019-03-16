@@ -2114,6 +2114,8 @@ static int tcpm_src_attach(struct tcpm_port *port)
 	if (ret < 0)
 		return ret;
 
+	tcpm_set_cc(port, tcpm_rp_cc(port));
+
 	ret = port->tcpc->set_pd_rx(port->tcpc, true);
 	if (ret < 0)
 		goto out_disable_mux;
@@ -3462,10 +3464,10 @@ static void tcpm_pd_event_handler(struct work_struct *work)
 
 void tcpm_port_reset(struct tcpm_port *port)
 {
-        spin_lock(&port->pd_event_lock);
-        port->pd_events = TCPM_PORT_RESET_EVENT;
-        spin_unlock(&port->pd_event_lock);
-        queue_work(port->wq, &port->event_work);
+	spin_lock(&port->pd_event_lock);
+	port->pd_events = TCPM_PORT_RESET_EVENT;
+	spin_unlock(&port->pd_event_lock);
+	queue_work(port->wq, &port->event_work);
 }
 EXPORT_SYMBOL_GPL(tcpm_port_reset);
 

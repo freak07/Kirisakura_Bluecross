@@ -76,8 +76,9 @@
 #include <linux/frame.h>
 #include <linux/prefetch.h>
 #include <linux/irq.h>
-#include <linux/safestack.h>
 #include <linux/cpufreq_times.h>
+#include <linux/sched/loadavg.h>
+#include <linux/scs.h>
 
 #include <asm/switch_to.h>
 #include <asm/tlb.h>
@@ -177,21 +178,6 @@ unlock_rq_of(struct rq *rq, struct task_struct *p, struct rq_flags *flags)
 }
 
 /*
- * this_rq_lock - lock this runqueue and disable interrupts.
- */
-static struct rq *this_rq_lock(void)
-	__acquires(rq->lock)
-{
-	struct rq *rq;
-
-	local_irq_disable();
-	rq = this_rq();
-	raw_spin_lock(&rq->lock);
-
-	return rq;
-}
-
-/*
  * __task_rq_lock - lock the rq @p resides on.
  */
 struct rq *__task_rq_lock(struct task_struct *p, struct rq_flags *rf)
@@ -205,7 +191,7 @@ struct rq *__task_rq_lock(struct task_struct *p, struct rq_flags *rf)
 		rq = task_rq(p);
 		raw_spin_lock(&rq->lock);
 		if (likely(rq == task_rq(p) && !task_on_rq_migrating(p))) {
-			rf->cookie = lockdep_pin_lock(&rq->lock);
+			rq_pin_lock(rq, rf);
 			return rq;
 		}
 		raw_spin_unlock(&rq->lock);
@@ -245,7 +231,7 @@ struct rq *task_rq_lock(struct task_struct *p, struct rq_flags *rf)
 		 * pair with the WMB to ensure we must then also see migrating.
 		 */
 		if (likely(rq == task_rq(p) && !task_on_rq_migrating(p))) {
-			rf->cookie = lockdep_pin_lock(&rq->lock);
+			rq_pin_lock(rq, rf);
 			return rq;
 		}
 		raw_spin_unlock(&rq->lock);
@@ -775,8 +761,10 @@ static void set_load_weight(struct task_struct *p)
 static inline void enqueue_task(struct rq *rq, struct task_struct *p, int flags)
 {
 	update_rq_clock(rq);
-	if (!(flags & ENQUEUE_RESTORE))
+	if (!(flags & ENQUEUE_RESTORE)) {
 		sched_info_queued(rq, p);
+		psi_enqueue(p, flags & ENQUEUE_WAKEUP);
+	}
 	p->sched_class->enqueue_task(rq, p, flags);
 	walt_update_last_enqueue(p);
 	trace_sched_enq_deq_task(p, 1, cpumask_bits(&p->cpus_allowed)[0]);
@@ -785,8 +773,10 @@ static inline void enqueue_task(struct rq *rq, struct task_struct *p, int flags)
 static inline void dequeue_task(struct rq *rq, struct task_struct *p, int flags)
 {
 	update_rq_clock(rq);
-	if (!(flags & DEQUEUE_SAVE))
+	if (!(flags & DEQUEUE_SAVE)) {
 		sched_info_dequeued(rq, p);
+		psi_dequeue(p, flags & DEQUEUE_SLEEP);
+	}
 	p->sched_class->dequeue_task(rq, p, flags);
 	trace_sched_enq_deq_task(p, 0, cpumask_bits(&p->cpus_allowed)[0]);
 }
@@ -1240,9 +1230,9 @@ static int __set_cpus_allowed_ptr(struct task_struct *p,
 		 * OK, since we're going to drop the lock immediately
 		 * afterwards anyway.
 		 */
-		lockdep_unpin_lock(&rq->lock, rf.cookie);
+		rq_unpin_lock(rq, &rf);
 		rq = move_queued_task(rq, p, dest_cpu);
-		lockdep_repin_lock(&rq->lock, rf.cookie);
+		rq_repin_lock(rq, &rf);
 	}
 out:
 	task_rq_unlock(rq, p, &rf);
@@ -1758,7 +1748,7 @@ static inline void ttwu_activate(struct rq *rq, struct task_struct *p, int en_fl
  * Mark the task runnable and perform wakeup-preemption.
  */
 static void ttwu_do_wakeup(struct rq *rq, struct task_struct *p, int wake_flags,
-			   struct pin_cookie cookie)
+			   struct rq_flags *rf)
 {
 	check_preempt_curr(rq, p, wake_flags);
 	p->state = TASK_RUNNING;
@@ -1770,9 +1760,9 @@ static void ttwu_do_wakeup(struct rq *rq, struct task_struct *p, int wake_flags,
 		 * Our task @p is fully woken up and running; so its safe to
 		 * drop the rq->lock, hereafter rq is only used for statistics.
 		 */
-		lockdep_unpin_lock(&rq->lock, cookie);
+		rq_unpin_lock(rq, rf);
 		p->sched_class->task_woken(rq, p);
-		lockdep_repin_lock(&rq->lock, cookie);
+		rq_repin_lock(rq, rf);
 	}
 
 	if (rq->idle_stamp) {
@@ -1791,7 +1781,7 @@ static void ttwu_do_wakeup(struct rq *rq, struct task_struct *p, int wake_flags,
 
 static void
 ttwu_do_activate(struct rq *rq, struct task_struct *p, int wake_flags,
-		 struct pin_cookie cookie)
+		 struct rq_flags *rf)
 {
 	int en_flags = ENQUEUE_WAKEUP;
 
@@ -1806,7 +1796,7 @@ ttwu_do_activate(struct rq *rq, struct task_struct *p, int wake_flags,
 #endif
 
 	ttwu_activate(rq, p, en_flags);
-	ttwu_do_wakeup(rq, p, wake_flags, cookie);
+	ttwu_do_wakeup(rq, p, wake_flags, rf);
 }
 
 /*
@@ -1825,7 +1815,7 @@ static int ttwu_remote(struct task_struct *p, int wake_flags)
 	if (task_on_rq_queued(p)) {
 		/* check_preempt_curr() may use rq clock */
 		update_rq_clock(rq);
-		ttwu_do_wakeup(rq, p, wake_flags, rf.cookie);
+		ttwu_do_wakeup(rq, p, wake_flags, &rf);
 		ret = 1;
 	}
 	__task_rq_unlock(rq, &rf);
@@ -1838,15 +1828,15 @@ void sched_ttwu_pending(void)
 {
 	struct rq *rq = this_rq();
 	struct llist_node *llist = llist_del_all(&rq->wake_list);
-	struct pin_cookie cookie;
 	struct task_struct *p;
 	unsigned long flags;
+	struct rq_flags rf;
 
 	if (!llist)
 		return;
 
 	raw_spin_lock_irqsave(&rq->lock, flags);
-	cookie = lockdep_pin_lock(&rq->lock);
+	rq_pin_lock(rq, &rf);
 
 	while (llist) {
 		int wake_flags = 0;
@@ -1857,10 +1847,10 @@ void sched_ttwu_pending(void)
 		if (p->sched_remote_wakeup)
 			wake_flags = WF_MIGRATED;
 
-		ttwu_do_activate(rq, p, wake_flags, cookie);
+		ttwu_do_activate(rq, p, wake_flags, &rf);
 	}
 
-	lockdep_unpin_lock(&rq->lock, cookie);
+	rq_unpin_lock(rq, &rf);
 	raw_spin_unlock_irqrestore(&rq->lock, flags);
 }
 
@@ -1960,7 +1950,7 @@ bool cpus_share_cache(int this_cpu, int that_cpu)
 static void ttwu_queue(struct task_struct *p, int cpu, int wake_flags)
 {
 	struct rq *rq = cpu_rq(cpu);
-	struct pin_cookie cookie;
+	struct rq_flags rf;
 
 #if defined(CONFIG_SMP)
 	if (sched_feat(TTWU_QUEUE) && !cpus_share_cache(smp_processor_id(), cpu)) {
@@ -1971,9 +1961,9 @@ static void ttwu_queue(struct task_struct *p, int cpu, int wake_flags)
 #endif
 
 	raw_spin_lock(&rq->lock);
-	cookie = lockdep_pin_lock(&rq->lock);
-	ttwu_do_activate(rq, p, wake_flags, cookie);
-	lockdep_unpin_lock(&rq->lock, cookie);
+	rq_pin_lock(rq, &rf);
+	ttwu_do_activate(rq, p, wake_flags, &rf);
+	rq_unpin_lock(rq, &rf);
 	raw_spin_unlock(&rq->lock);
 }
 
@@ -2192,6 +2182,7 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	src_cpu = task_cpu(p);
 	if (src_cpu != cpu) {
 		wake_flags |= WF_MIGRATED;
+		psi_ttwu_dequeue(p);
 		set_task_cpu(p, cpu);
 		notif_required = true;
 	}
@@ -2224,7 +2215,7 @@ out:
  * ensure that this_rq() is locked, @p is bound to this_rq() and not
  * the current task.
  */
-static void try_to_wake_up_local(struct task_struct *p, struct pin_cookie cookie)
+static void try_to_wake_up_local(struct task_struct *p, struct rq_flags *rf)
 {
 	struct rq *rq = task_rq(p);
 
@@ -2245,11 +2236,11 @@ static void try_to_wake_up_local(struct task_struct *p, struct pin_cookie cookie
 		 * disabled avoiding further scheduler activity on it and we've
 		 * not yet picked a replacement task.
 		 */
-		lockdep_unpin_lock(&rq->lock, cookie);
+		rq_unpin_lock(rq, rf);
 		raw_spin_unlock(&rq->lock);
 		raw_spin_lock(&p->pi_lock);
 		raw_spin_lock(&rq->lock);
-		lockdep_repin_lock(&rq->lock, cookie);
+		rq_repin_lock(rq, rf);
 	}
 
 	if (!(p->state & TASK_NORMAL))
@@ -2266,7 +2257,7 @@ static void try_to_wake_up_local(struct task_struct *p, struct pin_cookie cookie
 		note_task_waking(p, wallclock);
 	}
 
-	ttwu_do_wakeup(rq, p, 0, cookie);
+	ttwu_do_wakeup(rq, p, 0, rf);
 	ttwu_stat(p, smp_processor_id(), 0);
 out:
 	raw_spin_unlock(&p->pi_lock);
@@ -2341,10 +2332,6 @@ static void __sched_fork(unsigned long clone_flags, struct task_struct *p)
 #ifdef CONFIG_SCHEDSTATS
 	/* Even if schedstat is disabled, there should not be garbage */
 	memset(&p->se.statistics, 0, sizeof(p->se.statistics));
-#endif
-
-#ifdef CONFIG_CPU_FREQ_TIMES
-	cpufreq_task_times_init(p);
 #endif
 
 	RB_CLEAR_NODE(&p->dl.rb_node);
@@ -2508,9 +2495,6 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 	cpu = get_cpu();
 
 	__sched_fork(clone_flags, p);
-#ifdef CONFIG_CPU_FREQ_TIMES
-	cpufreq_task_times_alloc(p);
-#endif
 	/*
 	 * We mark the process as NEW here. This guarantees that
 	 * nobody will actually run it, and a signal or other external
@@ -2730,9 +2714,9 @@ void wake_up_new_task(struct task_struct *p)
 		 * Nothing relies on rq->lock after this, so its fine to
 		 * drop it.
 		 */
-		lockdep_unpin_lock(&rq->lock, rf.cookie);
+		rq_unpin_lock(rq, &rf);
 		p->sched_class->task_woken(rq, p);
-		lockdep_repin_lock(&rq->lock, rf.cookie);
+		rq_repin_lock(rq, &rf);
 	}
 #endif
 	task_rq_unlock(rq, p, &rf);
@@ -3001,7 +2985,7 @@ asmlinkage __visible void schedule_tail(struct task_struct *prev)
  */
 static __always_inline struct rq *
 context_switch(struct rq *rq, struct task_struct *prev,
-	       struct task_struct *next, struct pin_cookie cookie)
+	       struct task_struct *next, struct rq_flags *rf)
 {
 	struct mm_struct *mm, *oldmm;
 
@@ -3033,7 +3017,7 @@ context_switch(struct rq *rq, struct task_struct *prev,
 	 * of the scheduler it's an obvious special-case), so we
 	 * do an early lockdep release here:
 	 */
-	lockdep_unpin_lock(&rq->lock, cookie);
+	rq_unpin_lock(rq, rf);
 	spin_release(&rq->lock.dep_map, 1, _THIS_IP_);
 
 	/* Here we just switch the register state and the stack. */
@@ -3269,6 +3253,7 @@ void scheduler_tick(void)
 	curr->sched_class->task_tick(rq, curr, 0);
 	cpu_load_update_active(rq);
 	calc_global_load_tick(rq);
+	psi_task_tick(rq);
 
 	early_notif = early_detection_notify(rq, wallclock);
 	if (early_notif)
@@ -3495,7 +3480,7 @@ static inline void schedule_debug(struct task_struct *prev)
  * Pick up the highest-prio task:
  */
 static inline struct task_struct *
-pick_next_task(struct rq *rq, struct task_struct *prev, struct pin_cookie cookie)
+pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 {
 	const struct sched_class *class = &fair_sched_class;
 	struct task_struct *p;
@@ -3506,20 +3491,20 @@ pick_next_task(struct rq *rq, struct task_struct *prev, struct pin_cookie cookie
 	 */
 	if (likely(prev->sched_class == class &&
 		   rq->nr_running == rq->cfs.h_nr_running)) {
-		p = fair_sched_class.pick_next_task(rq, prev, cookie);
+		p = fair_sched_class.pick_next_task(rq, prev, rf);
 		if (unlikely(p == RETRY_TASK))
 			goto again;
 
 		/* assumes fair_sched_class->next == idle_sched_class */
 		if (unlikely(!p))
-			p = idle_sched_class.pick_next_task(rq, prev, cookie);
+			p = idle_sched_class.pick_next_task(rq, prev, rf);
 
 		return p;
 	}
 
 again:
 	for_each_class(class) {
-		p = class->pick_next_task(rq, prev, cookie);
+		p = class->pick_next_task(rq, prev, rf);
 		if (p) {
 			if (unlikely(p == RETRY_TASK))
 				goto again;
@@ -3573,7 +3558,7 @@ static void __sched notrace __schedule(bool preempt)
 {
 	struct task_struct *prev, *next;
 	unsigned long *switch_count;
-	struct pin_cookie cookie;
+	struct rq_flags rf;
 	struct rq *rq;
 	int cpu;
 	u64 wallclock;
@@ -3597,7 +3582,7 @@ static void __sched notrace __schedule(bool preempt)
 	 */
 	smp_mb__before_spinlock();
 	raw_spin_lock(&rq->lock);
-	cookie = lockdep_pin_lock(&rq->lock);
+	rq_pin_lock(rq, &rf);
 
 	rq->clock_skip_update <<= 1; /* promote REQ to ACT */
 
@@ -3619,7 +3604,7 @@ static void __sched notrace __schedule(bool preempt)
 
 				to_wakeup = wq_worker_sleeping(prev);
 				if (to_wakeup)
-					try_to_wake_up_local(to_wakeup, cookie);
+					try_to_wake_up_local(to_wakeup, &rf);
 			}
 		}
 		switch_count = &prev->nvcsw;
@@ -3628,7 +3613,7 @@ static void __sched notrace __schedule(bool preempt)
 	if (task_on_rq_queued(prev))
 		update_rq_clock(rq);
 
-	next = pick_next_task(rq, prev, cookie);
+	next = pick_next_task(rq, prev, &rf);
 	clear_tsk_need_resched(prev);
 	clear_preempt_need_resched();
 	rq->clock_skip_update = 0;
@@ -3646,10 +3631,10 @@ static void __sched notrace __schedule(bool preempt)
 		++*switch_count;
 
 		trace_sched_switch(preempt, prev, next);
-		rq = context_switch(rq, prev, next, cookie); /* unlocks the rq */
+		rq = context_switch(rq, prev, next, &rf); /* unlocks the rq */
 	} else {
 		update_task_ravg(prev, rq, TASK_UPDATE, wallclock, 0);
-		lockdep_unpin_lock(&rq->lock, cookie);
+		rq_unpin_lock(rq, &rf);
 		raw_spin_unlock_irq(&rq->lock);
 	}
 
@@ -4333,9 +4318,8 @@ static int __sched_setscheduler(struct task_struct *p,
 	int queue_flags = DEQUEUE_SAVE | DEQUEUE_MOVE;
 	struct rq *rq;
 
-	/* may grab non-irq protected spin_locks */
-	if (pi)
-		BUG_ON(in_interrupt());
+	/* The pi code expects interrupts enabled */
+	BUG_ON(pi && in_interrupt());
 recheck:
 	/* double check policy once rq lock held */
 	if (policy < 0) {
@@ -5146,7 +5130,10 @@ SYSCALL_DEFINE3(sched_getaffinity, pid_t, pid, unsigned int, len,
  */
 SYSCALL_DEFINE0(sched_yield)
 {
-	struct rq *rq = this_rq_lock();
+	struct rq_flags rf;
+	struct rq *rq;
+
+	rq = this_rq_lock_irq(&rf);
 
 	schedstat_inc(rq->yld_count);
 	current->sched_class->yield_task(rq);
@@ -5155,9 +5142,8 @@ SYSCALL_DEFINE0(sched_yield)
 	 * Since we are going to call schedule() anyway, there's
 	 * no need to preempt or enable interrupts:
 	 */
-	__release(rq->lock);
-	spin_release(&rq->lock.dep_map, 1, _THIS_IP_);
-	do_raw_spin_unlock(&rq->lock);
+	preempt_disable();
+	rq_unlock(rq, &rf);
 	sched_preempt_enable_no_resched();
 
 	schedule();
@@ -5455,7 +5441,6 @@ static const char stat_nam[] = TASK_STATE_TO_CHAR_STR;
 void sched_show_task(struct task_struct *p)
 {
 	unsigned long free = 0;
-	unsigned long unsafe_free = 0;
 	int ppid;
 	unsigned long state = p->state;
 
@@ -5469,21 +5454,15 @@ void sched_show_task(struct task_struct *p)
 		printk(KERN_CONT "  running task    ");
 #ifdef CONFIG_DEBUG_STACK_USAGE
 	free = stack_not_used(p);
-	unsafe_free = unsafe_stack_not_used(p);
 #endif
 	ppid = 0;
 	rcu_read_lock();
 	if (pid_alive(p))
 		ppid = task_pid_nr(rcu_dereference(p->real_parent));
 	rcu_read_unlock();
-	if (IS_ENABLED(CONFIG_SAFESTACK))
-		printk(KERN_CONT "%5lu %5lu %5d %6d 0x%08lx\n", free, unsafe_free,
-			task_pid_nr(p), ppid,
-			(unsigned long)task_thread_info(p)->flags);
-	else
-		printk(KERN_CONT "%5lu %5d %6d 0x%08lx\n", free,
-			task_pid_nr(p), ppid,
-			(unsigned long)task_thread_info(p)->flags);
+	printk(KERN_CONT "%5lu %5d %6d 0x%08lx\n", free,
+		task_pid_nr(p), ppid,
+		(unsigned long)task_thread_info(p)->flags);
 
 	print_worker_info(KERN_INFO, p);
 	show_stack(p, NULL);
@@ -5494,22 +5473,12 @@ void show_state_filter(unsigned long state_filter)
 {
 	struct task_struct *g, *p;
 
-#ifdef CONFIG_SAFESTACK
-#if BITS_PER_LONG == 32
-	printk(KERN_INFO
-		"  task                PC stack   unsafe  pid father\n");
-#else
-	printk(KERN_INFO
-		"  task                        PC stack   unsafe  pid father\n");
-#endif
-#else
 #if BITS_PER_LONG == 32
 	printk(KERN_INFO
 		"  task                PC stack   pid father\n");
 #else
 	printk(KERN_INFO
 		"  task                        PC stack   pid father\n");
-#endif
 #endif
 	rcu_read_lock();
 	for_each_process_thread(g, p) {
@@ -5556,6 +5525,8 @@ void init_idle(struct task_struct *idle, int cpu, bool cpu_up)
 {
 	struct rq *rq = cpu_rq(cpu);
 	unsigned long flags;
+
+	scs_task_reset(idle);
 
 	__sched_fork(0, idle);
 
@@ -5838,7 +5809,7 @@ static void migrate_tasks(struct rq *dead_rq, bool migrate_pinned_tasks)
 {
 	struct rq *rq = dead_rq;
 	struct task_struct *next, *stop = rq->stop;
-	struct pin_cookie cookie;
+	struct rq_flags rf;
 	int dest_cpu;
 	unsigned int num_pinned_kthreads = 1; /* this thread */
 	LIST_HEAD(tasks);
@@ -5875,8 +5846,8 @@ static void migrate_tasks(struct rq *dead_rq, bool migrate_pinned_tasks)
 		/*
 		 * pick_next_task assumes pinned rq->lock.
 		 */
-		cookie = lockdep_pin_lock(&rq->lock);
-		next = pick_next_task(rq, &fake_task, cookie);
+		rq_pin_lock(rq, &rf);
+		next = pick_next_task(rq, &fake_task, &rf);
 		BUG_ON(!next);
 		next->sched_class->put_prev_task(rq, next);
 
@@ -5884,7 +5855,7 @@ static void migrate_tasks(struct rq *dead_rq, bool migrate_pinned_tasks)
 			!cpumask_intersects(&avail_cpus, &next->cpus_allowed)) {
 			detach_one_task(next, rq, &tasks);
 			num_pinned_kthreads += 1;
-			lockdep_unpin_lock(&rq->lock, cookie);
+			rq_unpin_lock(rq, &rf);
 			continue;
 		}
 
@@ -5897,7 +5868,7 @@ static void migrate_tasks(struct rq *dead_rq, bool migrate_pinned_tasks)
 		 * because !cpu_active at this point, which means load-balance
 		 * will not interfere. Also, stop-machine.
 		 */
-		lockdep_unpin_lock(&rq->lock, cookie);
+		rq_unpin_lock(rq, &rf);
 		raw_spin_unlock(&rq->lock);
 		raw_spin_lock(&next->pi_lock);
 		raw_spin_lock(&rq->lock);
@@ -8390,6 +8361,8 @@ void __init sched_init(void)
 	init_sched_fair_class();
 
 	init_schedstats();
+
+	psi_init();
 
 	scheduler_running = 1;
 }

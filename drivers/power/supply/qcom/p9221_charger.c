@@ -27,6 +27,7 @@
 #include <linux/delay.h>
 #include <linux/power_supply.h>
 #include <linux/pmic-voter.h>
+#include <linux/alarmtimer.h>
 #include "p9221_charger.h"
 
 #define P9221_TX_TIMEOUT_MS		(20 * 1000)
@@ -41,14 +42,12 @@
 #define OVC_BACKOFF_LIMIT		900000
 #define OVC_BACKOFF_AMOUNT		100000
 
+static void p9221_icl_ramp_reset(struct p9221_charger_data *charger);
+static void p9221_icl_ramp_start(struct p9221_charger_data *charger);
+
 static const u32 p9221_ov_set_lut[] = {
 	17000000, 20000000, 15000000, 13000000,
 	11000000, 11000000, 11000000, 11000000};
-
-static bool p9221_is_r5(struct p9221_charger_data *charger)
-{
-	return (charger->cust_id == P9221R5_CUSTOMER_ID_VAL);
-}
 
 static size_t p9221_hex_str(u8 *data, size_t len, char *buf, size_t max_buf,
 			    bool msbfirst)
@@ -128,60 +127,43 @@ static int p9221_reg_read_8(struct p9221_charger_data *charger,
 
 static bool p9221_reg_is_8_bit(struct p9221_charger_data *charger, u16 reg)
 {
-	if (p9221_is_r5(charger)) {
-		switch (reg) {
-		case P9221_CHIP_REVISION_REG:
-		case P9221R5_VOUT_SET_REG:
-		case P9221R5_ILIM_SET_REG:
-		case P9221R5_CHARGE_STAT_REG:
-		case P9221R5_EPT_REG:
-		case P9221R5_SYSTEM_MODE_REG:
-		case P9221R5_COM_CHAN_RESET_REG:
-		case P9221R5_COM_CHAN_SEND_SIZE_REG:
-		case P9221R5_COM_CHAN_SEND_IDX_REG:
-		case P9221R5_COM_CHAN_RECV_SIZE_REG:
-		case P9221R5_COM_CHAN_RECV_IDX_REG:
-		case P9221R5_DEBUG_REG:
-		case P9221R5_EPP_Q_FACTOR_REG:
-		case P9221R5_EPP_TX_GUARANTEED_POWER_REG:
-		case P9221R5_EPP_TX_POTENTIAL_POWER_REG:
-		case P9221R5_EPP_TX_CAPABILITY_FLAGS_REG:
-		case P9221R5_EPP_RENEGOTIATION_REG:
-		case P9221R5_EPP_CUR_RPP_HEADER_REG:
-		case P9221R5_EPP_CUR_NEGOTIATED_POWER_REG:
-		case P9221R5_EPP_CUR_MAXIMUM_POWER_REG:
-		case P9221R5_EPP_CUR_FSK_MODULATION_REG:
-		case P9221R5_EPP_REQ_RPP_HEADER_REG:
-		case P9221R5_EPP_REQ_NEGOTIATED_POWER_REG:
-		case P9221R5_EPP_REQ_MAXIMUM_POWER_REG:
-		case P9221R5_EPP_REQ_FSK_MODULATION_REG:
-		case P9221R5_VRECT_TARGET_REG:
-		case P9221R5_VRECT_KNEE_REG:
-		case P9221R5_FOD_SECTION_REG:
-		case P9221R5_VRECT_ADJ_REG:
-		case P9221R5_ALIGN_X_ADC_REG:
-		case P9221R5_ALIGN_Y_ADC_REG:
-		case P9221R5_ASK_MODULATION_DEPTH_REG:
-		case P9221R5_OVSET_REG:
-		case P9221R5_EPP_TX_SPEC_REV_REG:
-			return true;
-		default:
-			return false;
-		}
-	}
-
 	switch (reg) {
 	case P9221_CHIP_REVISION_REG:
 	case P9221_CUSTOMER_ID_REG:
-	case P9221_CHARGE_STAT_REG:
-	case P9221_EPT_REG:
-	case P9221_VOUT_SET_REG:
-	case P9221_ILIM_SET_REG:
-	case P9221_OP_MODE_REG:
 	case P9221_COM_REG:
-	case P9221_FW_SWITCH_KEY_REG:
-	case P9221_ALIGN_X_ADC_REG:
-	case P9221_ALIGN_Y_ADC_REG:
+	case P9221R5_VOUT_SET_REG:
+	case P9221R5_ILIM_SET_REG:
+	case P9221R5_CHARGE_STAT_REG:
+	case P9221R5_EPT_REG:
+	case P9221R5_SYSTEM_MODE_REG:
+	case P9221R5_COM_CHAN_RESET_REG:
+	case P9221R5_COM_CHAN_SEND_SIZE_REG:
+	case P9221R5_COM_CHAN_SEND_IDX_REG:
+	case P9221R5_COM_CHAN_RECV_SIZE_REG:
+	case P9221R5_COM_CHAN_RECV_IDX_REG:
+	case P9221R5_DEBUG_REG:
+	case P9221R5_EPP_Q_FACTOR_REG:
+	case P9221R5_EPP_TX_GUARANTEED_POWER_REG:
+	case P9221R5_EPP_TX_POTENTIAL_POWER_REG:
+	case P9221R5_EPP_TX_CAPABILITY_FLAGS_REG:
+	case P9221R5_EPP_RENEGOTIATION_REG:
+	case P9221R5_EPP_CUR_RPP_HEADER_REG:
+	case P9221R5_EPP_CUR_NEGOTIATED_POWER_REG:
+	case P9221R5_EPP_CUR_MAXIMUM_POWER_REG:
+	case P9221R5_EPP_CUR_FSK_MODULATION_REG:
+	case P9221R5_EPP_REQ_RPP_HEADER_REG:
+	case P9221R5_EPP_REQ_NEGOTIATED_POWER_REG:
+	case P9221R5_EPP_REQ_MAXIMUM_POWER_REG:
+	case P9221R5_EPP_REQ_FSK_MODULATION_REG:
+	case P9221R5_VRECT_TARGET_REG:
+	case P9221R5_VRECT_KNEE_REG:
+	case P9221R5_FOD_SECTION_REG:
+	case P9221R5_VRECT_ADJ_REG:
+	case P9221R5_ALIGN_X_ADC_REG:
+	case P9221R5_ALIGN_Y_ADC_REG:
+	case P9221R5_ASK_MODULATION_DEPTH_REG:
+	case P9221R5_OVSET_REG:
+	case P9221R5_EPP_TX_SPEC_REV_REG:
 		return true;
 	default:
 		return false;
@@ -191,8 +173,8 @@ static bool p9221_reg_is_8_bit(struct p9221_charger_data *charger, u16 reg)
 /*
  * Cook the value according to the register (R5+)
  */
-static int p9221_cook_reg_r5(struct p9221_charger_data *charger, u16 reg,
-			     u16 raw_data, u32 *val)
+static int p9221_cook_reg(struct p9221_charger_data *charger, u16 reg,
+			  u16 raw_data, u32 *val)
 {
 	/* Do the appropriate conversion */
 	switch (reg) {
@@ -246,78 +228,6 @@ static int p9221_cook_reg_r5(struct p9221_charger_data *charger, u16 reg,
 }
 
 /*
- * Cook the raw data according to the reg. (Rx, x != 5)
- */
-static int p9221_cook_reg_rx(struct p9221_charger_data *charger, u16 reg,
-			     u16 raw_data, u32 *val)
-{
-	/* Do the appropriate conversion */
-	switch (reg) {
-	/* The following raw values */
-	case P9221_ALIGN_X_ADC_REG:
-	case P9221_ALIGN_Y_ADC_REG:
-		*val = raw_data;
-		break;
-
-	case P9221_RX_IOUT_REG:
-		/* uA */
-		*val = raw_data * 1000;
-		break;
-
-	case P9221_RX_RAWIOUT_REG:
-		/* uA */
-		*val = (raw_data & P9221_RX_RAWIOUT_MASK) * 1000;
-		break;
-
-	case P9221_ILIM_SET_REG:
-		/* uA */
-		/* raw_data is in 100mA steps */
-		*val = (raw_data * 100) * 1000;
-		break;
-
-	case P9221_VOUT_SET_REG:
-		/* uV */
-		/* raw_data is in 100mV steps, 3500mV offset */
-		*val = (3500 + (raw_data * 100)) * 1000;
-		break;
-
-	case P9221_RX_PINGFREQ_REG:
-		/* Hz */
-		*val = (raw_data &= P9221_RX_PINGFREQ_MASK) * 1000;
-		break;
-
-	case P9221_DIE_TEMP_ADC_REG:
-		/* tenths of deg C */
-		raw_data &= P9221_DIE_TEMP_ADC_MASK;
-		*val = ((((u32)(raw_data * 10) - 13500) *
-			830) / 4440) - 2730;
-		break;
-
-	case P9221_VOUT_ADC_REG:
-		/* uV */
-		raw_data &= P9221_VOUT_ADC_MASK;
-		*val = ((u64)raw_data * 6 * 2100000) / 4095;
-		break;
-
-	case P9221_VRECT_ADC_REG:
-		/* uV */
-		raw_data &= P9221_VRECT_ADC_MASK;
-		*val = ((u64)raw_data * 10 * 2100000) / 4095;
-		break;
-
-	case P9221_OP_FREQ_REG:
-		/* Hz */
-		*val = (64 * 6000 * 1000) / raw_data;
-		break;
-
-	default:
-		return -ENOENT;
-	}
-
-	return 0;
-}
-
-/*
  * Read the reg and return the cooked value.
  */
 static int p9221_reg_read_cooked(struct p9221_charger_data *charger,
@@ -336,10 +246,7 @@ static int p9221_reg_read_cooked(struct p9221_charger_data *charger,
 	if (ret)
 		return ret;
 
-	if (p9221_is_r5(charger))
-		return p9221_cook_reg_r5(charger, reg, data, val);
-	else
-		return p9221_cook_reg_rx(charger, reg, data, val);
+	return p9221_cook_reg(charger, reg, data, val);
 }
 
 static int p9221_reg_write_n(struct p9221_charger_data *charger, u16 reg,
@@ -392,8 +299,8 @@ static int p9221_reg_write_8(struct p9221_charger_data *charger, u16 reg, u8 val
 /*
  * Uncook the values and write to register
  */
-static int p9221_reg_write_cooked_r5(struct p9221_charger_data *charger,
-				     u16 reg, u32 val)
+static int p9221_reg_write_cooked(struct p9221_charger_data *charger,
+				  u16 reg, u32 val)
 {
 	int ret = 0;
 	u16 data;
@@ -438,89 +345,21 @@ static int p9221_reg_write_cooked_r5(struct p9221_charger_data *charger,
 	return ret;
 }
 
-/*
- * Uncook the values and write to register
- */
-static int p9221_reg_write_cooked_rx(struct p9221_charger_data *charger,
-				     u16 reg, u32 val)
-{
-	int ret = 0;
-	u16 data;
-	int i;
-
-	/* Do the appropriate conversion */
-	switch (reg) {
-		case P9221_ILIM_SET_REG:
-			/* uA */
-			if (val > 1500000)
-				return -EINVAL;
-			data = val / (100 * 1000);
-			break;
-
-		case P9221_VOUT_SET_REG:
-			/* uV */
-			val /= 1000;
-			if (val < 3500 || val > charger->pdata->max_vout_mv)
-				return -EINVAL;
-			data = (val - 3500) / 100;
-			break;
-
-		case P9221_OVSET_REG:
-			/* uV */
-			for (i = 0; i < ARRAY_SIZE(p9221_ov_set_lut); i++) {
-				if (val == p9221_ov_set_lut[i])
-					break;
-			}
-			if (i == ARRAY_SIZE(p9221_ov_set_lut))
-				return -EINVAL;
-			data = i << P9221_OVSET_SHIFT;
-			break;
-		default:
-			return -ENOENT;
-	}
-
-	if (p9221_reg_is_8_bit(charger, reg))
-		ret = p9221_reg_write_8(charger, reg, data);
-	else
-		ret = p9221_reg_write_16(charger, reg, data);
-
-	return ret;
-}
-
-/*
- * Uncook the values and write to register
- */
-static int p9221_reg_write_cooked(struct p9221_charger_data *charger, u16 reg,
-				  u32 val)
-{
-	if (p9221_is_r5(charger))
-		return p9221_reg_write_cooked_r5(charger, reg, val);
-	else
-		return p9221_reg_write_cooked_rx(charger, reg, val);
-}
-
 static bool p9221_is_epp(struct p9221_charger_data *charger)
 {
 	int ret;
-	u16 vout_reg = P9221_VOUT_ADC_REG;
 	u32 vout_uv;
+	uint8_t reg;
 
-	if (p9221_is_r5(charger)) {
-		uint8_t reg;
+	ret = p9221_reg_read_8(charger, P9221R5_SYSTEM_MODE_REG, &reg);
+	if (ret == 0)
+		return (reg & P9221R5_SYSTEM_MODE_EXTENDED_MASK) > 0;
 
-		ret = p9221_reg_read_8(charger, P9221R5_SYSTEM_MODE_REG, &reg);
-		if (ret == 0)
-			return (reg & P9221R5_SYSTEM_MODE_EXTENDED_MASK) > 0;
-
-		dev_err(&charger->client->dev, "Could not read mode: %d\n",
-			ret);
-
-		vout_reg = P9221R5_VOUT_ADC_REG;
-	}
+	dev_err(&charger->client->dev, "Could not read mode: %d\n",
+		ret);
 
 	/* Check based on power supply voltage */
-
-	ret = p9221_reg_read_cooked(charger, vout_reg, &vout_uv);
+	ret = p9221_reg_read_cooked(charger, P9221R5_VOUT_ADC_REG, &vout_uv);
 	if (ret) {
 		dev_err(&charger->client->dev, "Could read VOUT_ADC, %d\n",
 			ret);
@@ -541,7 +380,6 @@ static void p9221_write_fod(struct p9221_charger_data *charger)
 	bool epp = false;
 	u8 *fod = NULL;
 	int fod_count = charger->pdata->fod_num;
-	u16 fod_reg = p9221_is_r5(charger) ? P9221R5_FOD_REG : P9221_FOD_REG;
 	int ret;
 	int retries = 3;
 
@@ -566,9 +404,11 @@ static void p9221_write_fod(struct p9221_charger_data *charger)
 		u8 fod_read[fod_count];
 
 		dev_info(&charger->client->dev, "Writing %s FOD (n=%d reg=%02x try=%d)\n",
-			 epp ? "EPP" : "BPP", fod_count, fod_reg, retries);
+			 epp ? "EPP" : "BPP", fod_count, P9221R5_FOD_REG,
+			 retries);
 
-		ret = p9221_reg_write_n(charger, fod_reg, fod, fod_count);
+		ret = p9221_reg_write_n(charger, P9221R5_FOD_REG, fod,
+					fod_count);
 		if (ret) {
 			dev_err(&charger->client->dev,
 				"Could not write FOD: %d\n", ret);
@@ -576,7 +416,8 @@ static void p9221_write_fod(struct p9221_charger_data *charger)
 		}
 
 		/* Verify the FOD has been written properly */
-		ret = p9221_reg_read_n(charger, fod_reg, fod_read, fod_count);
+		ret = p9221_reg_read_n(charger, P9221R5_FOD_REG, fod_read,
+				       fod_count);
 		if (ret) {
 			dev_err(&charger->client->dev,
 				"Could not read back FOD: %d\n", ret);
@@ -630,9 +471,6 @@ static int p9221_send_data(struct p9221_charger_data *charger)
 {
 	int ret;
 
-	if (!p9221_is_r5(charger))
-		return -ENODEV;
-
 	if (charger->tx_busy)
 		return -EBUSY;
 
@@ -663,6 +501,7 @@ static int p9221_send_data(struct p9221_charger_data *charger)
 
 	mutex_unlock(&charger->cmd_lock);
 	return ret;
+
 error:
 	mutex_unlock(&charger->cmd_lock);
 	charger->tx_busy = false;
@@ -672,21 +511,14 @@ error:
 static int p9221_send_csp(struct p9221_charger_data *charger, u8 stat)
 {
 	int ret;
-	u8 cmd;
 
 	dev_info(&charger->client->dev, "Send CSP status=%d\n", stat);
 
 	mutex_lock(&charger->cmd_lock);
 
-	if (p9221_is_r5(charger)) {
-		ret = p9221_reg_write_8(charger, P9221R5_CHARGE_STAT_REG, stat);
-		cmd = P9221R5_COM_SENDCSP;
-	} else {
-		ret = p9221_reg_write_8(charger, P9221_CHARGE_STAT_REG, stat);
-		cmd = P9221_COM_SEND_CHG_STAT_MASK;
-	}
+	ret = p9221_reg_write_8(charger, P9221R5_CHARGE_STAT_REG, stat);
 	if (ret == 0)
-		ret = p9221_set_cmd_reg(charger, cmd);
+		ret = p9221_set_cmd_reg(charger, P9221R5_COM_SENDCSP);
 
 	mutex_unlock(&charger->cmd_lock);
 	return ret;
@@ -695,21 +527,14 @@ static int p9221_send_csp(struct p9221_charger_data *charger, u8 stat)
 static int p9221_send_eop(struct p9221_charger_data *charger, u8 reason)
 {
 	int ret;
-	u8 cmd;
 
 	dev_info(&charger->client->dev, "Send EOP reason=%d\n", reason);
 
 	mutex_lock(&charger->cmd_lock);
 
-	if (p9221_is_r5(charger)) {
-		ret = p9221_reg_write_8(charger, P9221R5_EPT_REG, reason);
-		cmd = P9221R5_COM_SENDEPT;
-	} else {
-		ret = p9221_reg_write_8(charger, P9221_EPT_REG, reason);
-		cmd = P9221_COM_SEND_EOP_MASK;
-	}
+	ret = p9221_reg_write_8(charger, P9221R5_EPT_REG, reason);
 	if (ret == 0)
-		ret = p9221_set_cmd_reg(charger, cmd);
+		ret = p9221_set_cmd_reg(charger, P9221R5_COM_SENDEPT);
 
 	mutex_unlock(&charger->cmd_lock);
 	return ret;
@@ -718,9 +543,6 @@ static int p9221_send_eop(struct p9221_charger_data *charger, u8 reason)
 static int p9221_send_ccreset(struct p9221_charger_data *charger)
 {
 	int ret;
-
-	if (!p9221_is_r5(charger))
-		return -EINVAL;
 
 	dev_info(&charger->client->dev, "Send CC reset\n");
 
@@ -736,15 +558,6 @@ static int p9221_send_ccreset(struct p9221_charger_data *charger)
 }
 
 struct p9221_prop_reg_map_entry p9221_prop_reg_map[] = {
-	/* property			register			g, s */
-	{POWER_SUPPLY_PROP_CURRENT_NOW,	P9221_RX_IOUT_REG,		1, 0},
-	{POWER_SUPPLY_PROP_VOLTAGE_NOW,	P9221_VOUT_ADC_REG,		1, 0},
-	{POWER_SUPPLY_PROP_VOLTAGE_MAX, P9221_VOUT_SET_REG,		1, 1},
-	{POWER_SUPPLY_PROP_TEMP,	P9221_DIE_TEMP_ADC_REG,		1, 0},
-	{POWER_SUPPLY_PROP_CAPACITY,	0,				1, 1},
-};
-
-struct p9221_prop_reg_map_entry p9221_prop_reg_map_r5[] = {
 	/* property			register			g, s */
 	{POWER_SUPPLY_PROP_CURRENT_NOW,	P9221R5_IOUT_REG,		1, 0},
 	{POWER_SUPPLY_PROP_VOLTAGE_NOW,	P9221R5_VOUT_REG,		1, 0},
@@ -762,14 +575,8 @@ static struct p9221_prop_reg_map_entry *p9221_get_map_entry(
 	struct p9221_prop_reg_map_entry *p;
 	int map_size;
 
-	if (p9221_is_r5(charger)) {
-		p = p9221_prop_reg_map_r5;
-		map_size = ARRAY_SIZE(p9221_prop_reg_map_r5);
-	} else {
-		p = p9221_prop_reg_map;
-		map_size = ARRAY_SIZE(p9221_prop_reg_map);
-	}
-
+	p = p9221_prop_reg_map;
+	map_size = ARRAY_SIZE(p9221_prop_reg_map);
 
 	for (i = 0; i < map_size; i++) {
 		if (p->prop == prop) {
@@ -878,6 +685,7 @@ static void p9221_set_offline(struct p9221_charger_data *charger)
 
 	p9221_abort_transfers(charger);
 	cancel_delayed_work(&charger->dcin_work);
+	p9221_icl_ramp_reset(charger);
 	del_timer(&charger->vrect_timer);
 
 	p9221_vote_defaults(charger);
@@ -929,33 +737,30 @@ static const char *p9221_get_tx_id_str(struct p9221_charger_data *charger)
 	if (!charger->online)
 		return NULL;
 
-	if (p9221_is_r5(charger)) {
-		pm_runtime_get_sync(charger->dev);
-		if (!charger->resume_complete) {
-			pm_runtime_put_sync(charger->dev);
-			return NULL;
-		}
+	pm_runtime_get_sync(charger->dev);
+	if (!charger->resume_complete) {
 		pm_runtime_put_sync(charger->dev);
+		return NULL;
+	}
+	pm_runtime_put_sync(charger->dev);
 
-		if (p9221_is_epp(charger)) {
-			ret = p9221_reg_read_n(charger, P9221R5_PROP_TX_ID_REG,
-					       &tx_id, sizeof(tx_id));
-			if (ret)
-				dev_err(&charger->client->dev,
-					"Failed to read txid %d\n", ret);
-		} else {
-			/*
-			 * If pp_buf_valid is true, we have received a serial
-			 * number from the Tx, copy it to tx_id. (pp_buf_valid
-			 * is left true here until we go offline as we may
-			 * read this multiple times.)
-			 */
-			if (charger->pp_buf_valid &&
-			    sizeof(tx_id) <= P9221R5_MAX_PP_BUF_SIZE)
-				memcpy(&tx_id, &charger->pp_buf[1],
-				       sizeof(tx_id));
-		}
-
+	if (p9221_is_epp(charger)) {
+		ret = p9221_reg_read_n(charger, P9221R5_PROP_TX_ID_REG,
+				       &tx_id, sizeof(tx_id));
+		if (ret)
+			dev_err(&charger->client->dev,
+				"Failed to read txid %d\n", ret);
+	} else {
+		/*
+		 * If pp_buf_valid is true, we have received a serial
+		 * number from the Tx, copy it to tx_id. (pp_buf_valid
+		 * is left true here until we go offline as we may
+		 * read this multiple times.)
+		 */
+		if (charger->pp_buf_valid &&
+		    sizeof(tx_id) <= P9221R5_MAX_PP_BUF_SIZE)
+			memcpy(&tx_id, &charger->pp_buf[1],
+			       sizeof(tx_id));
 	}
 	scnprintf(charger->tx_id_str, sizeof(charger->tx_id_str),
 		  "%08x", tx_id);
@@ -996,6 +801,9 @@ static int p9221_get_property(struct power_supply *psy,
 			break;
 
 		val->intval = ret;
+
+		/* success */
+		ret = 0;
 		break;
 	default:
 		ret = p9221_get_property_reg(charger, prop, val);
@@ -1132,14 +940,10 @@ out:
 static int p9221_clear_interrupts(struct p9221_charger_data *charger, u16 mask)
 {
 	int ret;
-	uint16_t reg;
-
-	reg = p9221_is_r5(charger) ? P9221R5_INT_CLEAR_REG :
-				     P9221_INT_CLEAR_REG;
 
 	mutex_lock(&charger->cmd_lock);
 
-	ret = p9221_reg_write_16(charger, reg, mask);
+	ret = p9221_reg_write_16(charger, P9221R5_INT_CLEAR_REG, mask);
 	if (ret) {
 		dev_err(&charger->client->dev,
 			"Failed to clear INT reg: %d\n", ret);
@@ -1162,17 +966,13 @@ out:
  */
 static int p9221_enable_interrupts(struct p9221_charger_data *charger)
 {
-	u16 mask = 0;
+	u16 mask;
 	int ret;
 
 	dev_dbg(&charger->client->dev, "Enable interrupts\n");
 
-	if (p9221_is_r5(charger))
-		mask = P9221R5_STAT_LIMIT_MASK | P9221R5_STAT_CC_MASK;
-	else
-		mask = P9221_STAT_LIMIT_MASK;
-
-	mask |= P9221_STAT_VRECT;
+	mask = P9221R5_STAT_LIMIT_MASK | P9221R5_STAT_CC_MASK |
+	       P9221_STAT_VRECT;
 
 	ret = p9221_clear_interrupts(charger, mask);
 	if (ret)
@@ -1200,29 +1000,99 @@ static int p9221_set_dc_icl(struct p9221_charger_data *charger)
 		}
 	}
 
-	/* Default to 1000mA ICL */
+	/* Default to BPP ICL */
 	icl = P9221_DC_ICL_BPP_UA;
 
-	/* For EPP operation, use 1100mA ICL */
+	if (charger->icl_ramp)
+		icl = charger->icl_ramp_ua;
+
 	if (p9221_is_epp(charger))
 		icl = P9221_DC_ICL_EPP_UA;
 
-	dev_info(&charger->client->dev, "Setting ICL %duA\n", icl);
+	dev_info(&charger->client->dev, "Setting ICL %duA ramp=%d\n", icl,
+		 charger->icl_ramp);
 	ret = vote(charger->dc_icl_votable, P9221_WLC_VOTER, true, icl);
 	if (ret)
 		dev_err(&charger->client->dev,
 			"Could not vote DC_ICL %d\n", ret);
 
 	/* Increase the IOUT limit */
-	if (p9221_is_r5(charger)) {
-		ret = p9221_reg_write_cooked_r5(charger, P9221R5_ILIM_SET_REG,
-						P9221R5_ILIM_MAX_UA);
-		if (ret)
-			dev_err(&charger->client->dev,
-				"Could not set rx_iout limit reg: %d\n", ret);
-	}
+	ret = p9221_reg_write_cooked(charger, P9221R5_ILIM_SET_REG,
+				     P9221R5_ILIM_MAX_UA);
+	if (ret)
+		dev_err(&charger->client->dev,
+			"Could not set rx_iout limit reg: %d\n", ret);
 
 	return ret;
+}
+
+static enum alarmtimer_restart p9221_icl_ramp_alarm_cb(struct alarm *alarm,
+						       ktime_t now)
+{
+	struct p9221_charger_data *charger =
+			container_of(alarm, struct p9221_charger_data,
+				     icl_ramp_alarm);
+
+	dev_info(&charger->client->dev, "ICL ramp alarm, ramp=%d\n",
+		 charger->icl_ramp);
+
+	/* Alarm is in atomic context, schedule work to complete the task */
+	pm_stay_awake(charger->dev);
+	schedule_delayed_work(&charger->icl_ramp_work, msecs_to_jiffies(100));
+
+	return ALARMTIMER_NORESTART;
+}
+
+static void p9221_icl_ramp_work(struct work_struct *work)
+{
+	struct p9221_charger_data *charger = container_of(work,
+			struct p9221_charger_data, icl_ramp_work.work);
+
+	pm_runtime_get_sync(charger->dev);
+	if (!charger->resume_complete) {
+		pm_runtime_put_sync(charger->dev);
+		schedule_delayed_work(&charger->icl_ramp_work,
+				      msecs_to_jiffies(100));
+		dev_dbg(&charger->client->dev, "Ramp reschedule\n");
+		return;
+	}
+	pm_runtime_put_sync(charger->dev);
+
+	dev_info(&charger->client->dev, "ICL ramp work, ramp=%d\n",
+		 charger->icl_ramp);
+
+	charger->icl_ramp = true;
+	p9221_set_dc_icl(charger);
+
+	pm_relax(charger->dev);
+}
+
+static void p9221_icl_ramp_reset(struct p9221_charger_data *charger)
+{
+	dev_info(&charger->client->dev, "ICL ramp reset, ramp=%d\n",
+		 charger->icl_ramp);
+
+	charger->icl_ramp = false;
+
+	if (alarm_try_to_cancel(&charger->icl_ramp_alarm) < 0)
+		dev_warn(&charger->client->dev, "Couldn't cancel icl_ramp_alarm\n");
+	cancel_delayed_work(&charger->icl_ramp_work);
+}
+
+static void p9221_icl_ramp_start(struct p9221_charger_data *charger)
+{
+	/* Only ramp on BPP at this time */
+	if (p9221_is_epp(charger))
+		return;
+
+	p9221_icl_ramp_reset(charger);
+
+	dev_info(&charger->client->dev, "ICL ramp set alarm %dms, %dua, ramp=%d\n",
+		 charger->icl_ramp_delay_ms, charger->icl_ramp_ua,
+		 charger->icl_ramp);
+
+	alarm_start_relative(&charger->icl_ramp_alarm,
+			     ms_to_ktime(charger->icl_ramp_delay_ms));
 }
 
 static void p9221_set_online(struct p9221_charger_data *charger)
@@ -1291,6 +1161,7 @@ static void p9221_notifier_check_dc(struct p9221_charger_data *charger)
 		p9221_write_fod(charger);
 		if (charger->last_capacity > 0)
 			p9221_send_csp(charger, charger->last_capacity);
+		p9221_icl_ramp_start(charger);
 	}
 
 	/* We may have already gone online during check_det */
@@ -1472,8 +1343,8 @@ static ssize_t p9221_show_status(struct device *dev,
 	struct p9221_charger_data *charger = i2c_get_clientdata(client);
 	int count = 0;
 	int ret;
-	u8 tmp[P9221_NUM_FOD];
-	int fod_reg = P9221_FOD_REG;
+	u8 tmp[P9221R5_NUM_FOD];
+	uint32_t tx_id = 0;
 
 	if (!charger->online)
 		return -ENODEV;
@@ -1490,87 +1361,62 @@ static ssize_t p9221_show_status(struct device *dev,
 				      P9221_INT_ENABLE_REG, 16, 0,
 				      "int_enable  : ", "%04x\n");
 
-	if (p9221_is_r5(charger)) {
-		uint32_t tx_id = 0;
 
-		fod_reg = P9221R5_FOD_REG;
+	count += p9221_add_reg_buffer(charger, buf, count,
+				      P9221R5_SYSTEM_MODE_REG, 8, 0,
+				      "mode        : ", "%02x\n");
 
-		count += p9221_add_reg_buffer(charger, buf, count,
-					      P9221R5_SYSTEM_MODE_REG, 8, 0,
-					      "mode        : ", "%02x\n");
+	count += p9221_add_reg_buffer(charger, buf, count,
+				      P9221R5_VOUT_REG, 16, 1,
+				      "vout        : ", "%d uV\n");
 
-		count += p9221_add_reg_buffer(charger, buf, count,
-					      P9221R5_VOUT_REG, 16, 1,
-					      "vout        : ", "%d uV\n");
+	count += p9221_add_reg_buffer(charger, buf, count,
+				      P9221R5_VRECT_REG, 16, 1,
+				      "vrect       : ", "%d uV\n");
 
-		count += p9221_add_reg_buffer(charger, buf, count,
-					      P9221R5_VRECT_REG, 16, 1,
-					      "vrect       : ", "%d uV\n");
+	count += p9221_add_reg_buffer(charger, buf, count,
+				      P9221R5_IOUT_REG, 16, 1,
+				      "iout        : ", "%d uA\n");
 
-		count += p9221_add_reg_buffer(charger, buf, count,
-					      P9221R5_IOUT_REG, 16, 1,
-					      "iout        : ", "%d uA\n");
+	count += p9221_add_reg_buffer(charger, buf, count,
+				      P9221R5_ILIM_SET_REG, 16, 1,
+				      "ilim        : ", "%d uA\n");
 
-		count += p9221_add_reg_buffer(charger, buf, count,
-					      P9221R5_ILIM_SET_REG, 16, 1,
-					      "ilim        : ", "%d uA\n");
+	count += p9221_add_reg_buffer(charger, buf, count,
+				      P9221R5_OP_FREQ_REG, 16, 1,
+				      "freq        : ", "%d hz\n");
+	count += scnprintf(buf + count, PAGE_SIZE - count,
+			   "tx_busy     : %d\n", charger->tx_busy);
+	count += scnprintf(buf + count, PAGE_SIZE - count,
+			   "tx_done     : %d\n", charger->tx_done);
+	count += scnprintf(buf + count, PAGE_SIZE - count,
+			   "rx_done     : %d\n", charger->rx_done);
+	count += scnprintf(buf + count, PAGE_SIZE - count,
+			   "tx_len      : %d\n", charger->tx_len);
+	count += scnprintf(buf + count, PAGE_SIZE - count,
+			   "rx_len      : %d\n", charger->rx_len);
+	p9221_reg_read_n(charger, P9221R5_PROP_TX_ID_REG, &tx_id,
+			 sizeof(tx_id));
+	count += scnprintf(buf + count, PAGE_SIZE - count,
+			   "tx_id       : %08x (%s)\n", tx_id,
+			   p9221_get_tx_id_str(charger));
 
-		count += p9221_add_reg_buffer(charger, buf, count,
-					      P9221R5_OP_FREQ_REG, 16, 1,
-					      "freq        : ", "%d hz\n");
-		count += scnprintf(buf + count, PAGE_SIZE - count,
-				   "tx_busy     : %d\n", charger->tx_busy);
-		count += scnprintf(buf + count, PAGE_SIZE - count,
-				   "tx_done     : %d\n", charger->tx_done);
-		count += scnprintf(buf + count, PAGE_SIZE - count,
-				   "rx_done     : %d\n", charger->rx_done);
-		count += scnprintf(buf + count, PAGE_SIZE - count,
-				   "tx_len      : %d\n", charger->tx_len);
-		count += scnprintf(buf + count, PAGE_SIZE - count,
-				   "rx_len      : %d\n", charger->rx_len);
-		p9221_reg_read_n(charger, P9221R5_PROP_TX_ID_REG, &tx_id,
-				 sizeof(tx_id));
-		count += scnprintf(buf + count, PAGE_SIZE - count,
-				   "tx_id       : %08x (%s)\n", tx_id,
-				   p9221_get_tx_id_str(charger));
+	count += p9221_add_reg_buffer(charger, buf, count,
+				      P9221R5_ALIGN_X_ADC_REG, 8, 1,
+				      "align_x     : ", "%d\n");
 
-		count += p9221_add_reg_buffer(charger, buf, count,
-					      P9221R5_ALIGN_X_ADC_REG, 8, 1,
-					      "align_x     : ", "%d\n");
-
-		count += p9221_add_reg_buffer(charger, buf, count,
-					      P9221R5_ALIGN_Y_ADC_REG, 8, 1,
-					      "align_y     : ", "%d\n");
-	} else {
-		count += p9221_add_reg_buffer(charger, buf, count,
-					      P9221_VOUT_ADC_REG, 16, 1,
-					      "vout        : ", "%d uV\n");
-
-		count += p9221_add_reg_buffer(charger, buf, count,
-					      P9221_VRECT_ADC_REG, 16, 1,
-					      "vrect       : ", "%d uV\n");
-
-		count += p9221_add_reg_buffer(charger, buf, count,
-					      P9221_RX_IOUT_REG, 16, 1,
-					      "iout        : ", "%d uA\n");
-
-		count += p9221_add_reg_buffer(charger, buf, count,
-					      P9221_ILIM_SET_REG, 16, 1,
-					      "ilim        : ", "%d uA\n");
-
-		count += p9221_add_reg_buffer(charger, buf, count,
-					      P9221_OP_FREQ_REG, 16, 1,
-					      "freq        : ", "%d hz\n");
-	}
+	count += p9221_add_reg_buffer(charger, buf, count,
+				      P9221R5_ALIGN_Y_ADC_REG, 8, 1,
+				      "align_y     : ", "%d\n");
 
 	/* FOD Register */
-	ret = p9221_reg_read_n(charger, fod_reg, tmp, P9221_NUM_FOD);
+	ret = p9221_reg_read_n(charger, P9221R5_FOD_REG, tmp, P9221R5_NUM_FOD);
 	count += scnprintf(buf + count, PAGE_SIZE - count, "fod         : ");
 	if (ret)
 		count += scnprintf(buf + count, PAGE_SIZE - count,
 				   "err %d\n", ret);
 	else {
-		count += p9221_hex_str(tmp, P9221_NUM_FOD, buf + count, count,
+		count += p9221_hex_str(tmp, P9221R5_NUM_FOD, buf + count, count,
 				       false);
 		count += scnprintf(buf + count, PAGE_SIZE - count, "\n");
 	}
@@ -1626,6 +1472,65 @@ static ssize_t p9221_store_count(struct device *dev,
 }
 
 static DEVICE_ATTR(count, 0644, p9221_show_count, p9221_store_count);
+
+static ssize_t p9221_show_icl_ramp_delay_ms(struct device *dev,
+					    struct device_attribute *attr,
+					    char *buf)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct p9221_charger_data *charger = i2c_get_clientdata(client);
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", charger->icl_ramp_delay_ms);
+}
+
+static ssize_t p9221_store_icl_ramp_delay_ms(struct device *dev,
+					     struct device_attribute *attr,
+					     const char *buf, size_t count)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct p9221_charger_data *charger = i2c_get_clientdata(client);
+	int ret;
+	u32 ms;
+
+	ret = kstrtou32(buf, 10, &ms);
+	if (ret < 0)
+		return ret;
+	charger->icl_ramp_delay_ms = ms;
+	return count;
+}
+
+static DEVICE_ATTR(icl_ramp_delay_ms, 0644,
+		   p9221_show_icl_ramp_delay_ms,
+		   p9221_store_icl_ramp_delay_ms);
+
+static ssize_t p9221_show_icl_ramp_ua(struct device *dev,
+				      struct device_attribute *attr,
+				      char *buf)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct p9221_charger_data *charger = i2c_get_clientdata(client);
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", charger->icl_ramp_ua);
+}
+
+static ssize_t p9221_store_icl_ramp_ua(struct device *dev,
+				       struct device_attribute *attr,
+				       const char *buf, size_t count)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct p9221_charger_data *charger = i2c_get_clientdata(client);
+	int ret;
+	u32 ua;
+
+	ret = kstrtou32(buf, 10, &ua);
+	if (ret < 0)
+		return ret;
+	charger->icl_ramp_ua = ua;
+	return count;
+}
+
+static DEVICE_ATTR(icl_ramp_ua, 0644,
+		   p9221_show_icl_ramp_ua, p9221_store_icl_ramp_ua);
 
 static ssize_t p9221_show_addr(struct device *dev,
 			       struct device_attribute *attr,
@@ -1846,6 +1751,8 @@ static struct attribute *p9221_attributes[] = {
 	&dev_attr_txlen.attr,
 	&dev_attr_rxlen.attr,
 	&dev_attr_rxdone.attr,
+	&dev_attr_icl_ramp_ua.attr,
+	&dev_attr_icl_ramp_delay_ms.attr,
 	NULL
 };
 
@@ -1913,29 +1820,6 @@ static const struct attribute_group p9221_attr_group = {
 	.bin_attrs	= p9221_bin_attributes,
 };
 
-static void p9221_irq_handler(struct p9221_charger_data *charger,
-			      u16 irq_src)
-{
-	u8 reason = 0;
-	int ret;
-
-	if (!(irq_src & P9221_STAT_LIMIT_MASK))
-		return;
-
-	dev_err(&charger->client->dev, "Received OVER INT: %02x\n", irq_src);
-	if (irq_src & P9221_STAT_OV_TEMP)
-		reason = P9221_EOP_OVER_TEMP;
-	else if (irq_src & P9221_STAT_OV_VOLT)
-		reason = P9221_EOP_OVER_VOLT;
-	else
-		reason = P9221_EOP_OVER_CURRENT;
-
-	ret = p9221_send_eop(charger, reason);
-	if (ret)
-		dev_err(&charger->client->dev,
-			"Failed to send EOP %d: %d\n", reason, ret);
-}
-
 static void print_current_samples(struct p9221_charger_data *charger,
 					u32 *iout_val, int count)
 {
@@ -1953,8 +1837,8 @@ static void print_current_samples(struct p9221_charger_data *charger,
  * Number of times to poll the status to see if the current limit condition
  * was transient or not.
  */
-static void p9221_over_handle_r5(struct p9221_charger_data *charger,
-				 u16 irq_src)
+static void p9221_over_handle(struct p9221_charger_data *charger,
+			      u16 irq_src)
 {
 	u8 reason = 0;
 	int i;
@@ -2054,12 +1938,12 @@ send_eop:
 }
 
 /* Handler for R5 and R7 chips */
-static void p9221r5_irq_handler(struct p9221_charger_data *charger, u16 irq_src)
+static void p9221_irq_handler(struct p9221_charger_data *charger, u16 irq_src)
 {
 	int res;
 
 	if (irq_src & P9221R5_STAT_LIMIT_MASK)
-		p9221_over_handle_r5(charger, irq_src);
+		p9221_over_handle(charger, irq_src);
 
 	/* Receive complete */
 	if (irq_src & P9221R5_STAT_CCDATARCVD) {
@@ -2165,10 +2049,7 @@ static irqreturn_t p9221_irq_thread(int irq, void *irq_data)
 		}
 	}
 
-	if (p9221_is_r5(charger))
-		p9221r5_irq_handler(charger, irq_src);
-	else
-		p9221_irq_handler(charger, irq_src);
+	p9221_irq_handler(charger, irq_src);
 
 out:
 	return IRQ_HANDLED;
@@ -2251,11 +2132,11 @@ static int p9221_parse_dt(struct device *dev,
 		dev_err(dev, "No dt fod provided (%d)\n", pdata->fod_num);
 		pdata->fod_num = 0;
 	} else {
-		if (pdata->fod_num > P9221_NUM_FOD) {
+		if (pdata->fod_num > P9221R5_NUM_FOD) {
 			dev_err(dev,
 			    "Incorrect num of FOD %d, using first %d\n",
-			    pdata->fod_num, P9221_NUM_FOD);
-			pdata->fod_num = P9221_NUM_FOD;
+			    pdata->fod_num, P9221R5_NUM_FOD);
+			pdata->fod_num = P9221R5_NUM_FOD;
 		}
 		ret = of_property_read_u8_array(node, "fod", pdata->fod,
 						pdata->fod_num);
@@ -2275,11 +2156,11 @@ static int p9221_parse_dt(struct device *dev,
 			pdata->fod_epp_num);
 		pdata->fod_epp_num = 0;
 	} else {
-		if (pdata->fod_epp_num > P9221_NUM_FOD) {
+		if (pdata->fod_epp_num > P9221R5_NUM_FOD) {
 			dev_err(dev,
 			    "Incorrect num of EPP FOD %d, using first %d\n",
-			    pdata->fod_epp_num, P9221_NUM_FOD);
-			pdata->fod_epp_num = P9221_NUM_FOD;
+			    pdata->fod_epp_num, P9221R5_NUM_FOD);
+			pdata->fod_epp_num = P9221R5_NUM_FOD;
 		}
 		ret = of_property_read_u8_array(node, "fod_epp", pdata->fod_epp,
 						pdata->fod_epp_num);
@@ -2367,6 +2248,9 @@ static int p9221_charger_probe(struct i2c_client *client,
 		    (unsigned long)charger);
 	INIT_DELAYED_WORK(&charger->dcin_work, p9221_dcin_work);
 	INIT_DELAYED_WORK(&charger->tx_work, p9221_tx_work);
+	INIT_DELAYED_WORK(&charger->icl_ramp_work, p9221_icl_ramp_work);
+	alarm_init(&charger->icl_ramp_alarm, ALARM_BOOTTIME,
+		   p9221_icl_ramp_alarm_cb);
 
 	/* Default enable */
 	charger->enabled = true;
@@ -2393,6 +2277,9 @@ static int p9221_charger_probe(struct i2c_client *client,
 	charger->dc_icl_votable = find_votable("DC_ICL");
 	if (!charger->dc_icl_votable)
 		dev_warn(&charger->client->dev, "Could not find DC_ICL votable\n");
+
+	charger->icl_ramp_ua = P9221_DC_ICL_BPP_RAMP_DEFAULT_UA;
+	charger->icl_ramp_delay_ms = P9221_DC_ICL_BPP_RAMP_DELAY_DEFAULT_MS;
 
 	/* Test to see if the charger is online */
 	ret = p9221_reg_read_16(charger, P9221_CHIP_ID_REG, &chip_id);
@@ -2477,6 +2364,8 @@ static int p9221_charger_remove(struct i2c_client *client)
 
 	cancel_delayed_work_sync(&charger->dcin_work);
 	cancel_delayed_work_sync(&charger->tx_work);
+	cancel_delayed_work_sync(&charger->icl_ramp_work);
+	alarm_try_to_cancel(&charger->icl_ramp_alarm);
 	del_timer_sync(&charger->vrect_timer);
 	device_init_wakeup(charger->dev, false);
 	cancel_delayed_work_sync(&charger->notifier_work);

@@ -3,6 +3,7 @@ KERNEL_DIR=private/msm-google
 POST_DEFCONFIG_CMDS="check_defconfig && update_debug_config"
 function update_debug_config() {
     ${KERNEL_DIR}/scripts/config --file ${OUT_DIR}/.config \
+         -e CONFIG_DEVMEM \
          -e CONFIG_DEBUG_OBJECTS \
          -e CONFIG_DEBUG_OBJECTS_FREE \
          -e CONFIG_DEBUG_OBJECTS_TIMERS \
@@ -31,8 +32,7 @@ function update_debug_config() {
          -e CONFIG_QCOM_RTB \
          -e CONFIG_QCOM_RTB_SEPARATE_CPUS \
          -e CONFIG_PANIC_ON_DATA_CORRUPTION \
-         -e CONFIG_QCOM_RTB \
-         -e CONFIG_QCOM_RTB_SEPARATE_CPUS \
+         -e CONFIG_REGMAP_ALLOW_WRITE_DEBUGFS \
          -d LTO \
          -d LTO_CLANG \
          -d CFI \

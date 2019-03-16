@@ -43,6 +43,7 @@
 
 #define OTG_ICL_VOTER "OTG_ICL_VOTER"
 #define OTG_DISABLE_APSD_VOTER "OTG_DISABLE_APSD_VOTER"
+#define DISABLE_CC_VOTER "DISABLE_CC_VOTER"
 
 struct usbpd {
 	struct device		dev;
@@ -115,12 +116,15 @@ struct usbpd {
 	bool usb_comm_capable;
 
 	bool apsd_done;
+	bool wlc_supported;
 	bool wireless_online;
 	bool in_explicit_contract;
 
 	/* alternate source capabilities */
 	struct work_struct update_pdo_work;
 	bool default_src_cap;
+
+	struct votable *disable_pr_switch;
 };
 
 /*
@@ -176,6 +180,10 @@ static void _pd_engine_log(struct usbpd *pd, const char *fmt, va_list args,
 			 "Bad log buffer index %d\n", pd->logbuffer_head);
 		goto abort;
 	}
+
+	if ((pd->logbuffer_head == pd->logbuffer_tail) ||
+	    (pd->logbuffer_head == LOG_BUFFER_ENTRIES - 1))
+		__pd_engine_log(pd, tmpbuffer, true);
 
 	if (pd->suspend_since_last_logged) {
 		__pd_engine_log(pd, tmpbuffer, true);
@@ -765,9 +773,10 @@ static void psy_changed_handler(struct work_struct *work)
 	enum power_supply_typec_mode typec_mode;
 	enum typec_cc_orientation typec_cc_orientation;
 
-	bool pe_start, wireless_online;
+	bool pe_start;
 
 	union power_supply_propval val;
+	bool wireless_online = false;
 	int ret = 0;
 
 	pm_wakeup_event(&pd->dev, PD_ACTIVITY_TIMEOUT_MS);
@@ -776,7 +785,7 @@ static void psy_changed_handler(struct work_struct *work)
 	if (ret < 0) {
 		pd_engine_log(pd, "Unable to read TYPEC_MODE, ret=%d",
 			      ret);
-		goto ret;
+		return;
 	}
 	typec_mode = val.intval;
 
@@ -785,7 +794,7 @@ static void psy_changed_handler(struct work_struct *work)
 	if (ret < 0) {
 		pd_engine_log(pd, "Unable to read PE_START, ret=%d",
 			      ret);
-		goto ret;
+		return;
 	}
 	pe_start = !!val.intval;
 
@@ -793,7 +802,7 @@ static void psy_changed_handler(struct work_struct *work)
 					POWER_SUPPLY_PROP_REAL_TYPE, &val);
 	if (ret < 0) {
 		pd_engine_log(pd, "Unable to read TYPE, ret=%d", ret);
-		goto ret;
+		return;
 	}
 	psy_type = val.intval;
 	pd->apsd_done = !!psy_type;
@@ -803,7 +812,7 @@ static void psy_changed_handler(struct work_struct *work)
 	if (ret < 0) {
 		pd_engine_log(pd, "Unable to read ONLINE, ret=%d",
 			      ret);
-		goto ret;
+		return;
 	}
 	vbus_present = val.intval;
 
@@ -814,20 +823,22 @@ static void psy_changed_handler(struct work_struct *work)
 		pd_engine_log(pd,
 			      "Unable to read TYPEC_CC_ORIENTATION, ret=%d",
 			      ret);
-		goto ret;
+		return;
 	}
 	typec_cc_orientation = val.intval;
 
-	ret = power_supply_get_property(pd->wireless_psy,
-					POWER_SUPPLY_PROP_ONLINE,
-					&val);
-	if (ret < 0) {
-		pd_engine_log(pd,
-			      "Unable to read wireless online property, ret=%d",
-			      ret);
-		goto ret;
+	if (pd->wlc_supported) {
+		ret = power_supply_get_property(pd->wireless_psy,
+						POWER_SUPPLY_PROP_ONLINE,
+						&val);
+		if (ret < 0) {
+			pd_engine_log(pd,
+				      "Unable to read wireless online property, ret=%d",
+				      ret);
+			return;
+		}
+		wireless_online = val.intval ? true : false;
 	}
-	wireless_online = val.intval ? true : false;
 
 	parse_cc_status(typec_mode, typec_cc_orientation, &cc1, &cc2);
 
@@ -904,9 +915,8 @@ static void psy_changed_handler(struct work_struct *work)
 		pd->pending_update_usb_data = false;
 	}
 unlock:
-	mutex_unlock(&pd->lock);
-ret:
 	kfree(event);
+	mutex_unlock(&pd->lock);
 }
 
 static int psy_changed(struct notifier_block *nb, unsigned long evt, void *ptr)
@@ -982,6 +992,24 @@ static int tcpm_set_cc(struct tcpc_dev *dev, enum typec_cc_status cc)
 		ret = -EINVAL;
 		goto unlock;
 	}
+
+	if (cc == TYPEC_CC_OPEN) {
+		/* Set CC to open and block later changes */
+		ret = vote(pd->disable_pr_switch, DISABLE_CC_VOTER, true, 0);
+		if (ret < 0) {
+			pd_engine_log(pd, "vote disable_pr_switch fail, ret %d",
+				      ret);
+		}
+	} else {
+		/* Make CC be configurable */
+		ret = vote(pd->disable_pr_switch, DISABLE_CC_VOTER, false, 0);
+		if (ret < 0) {
+			pd_engine_log(pd,
+				      "unvote disable_pr_switch fail, ret %d",
+				      ret);
+		}
+	}
+
 	ret = power_supply_set_property(pd->usb_psy,
 					POWER_SUPPLY_PROP_TYPEC_POWER_ROLE,
 					&val);
@@ -1383,6 +1411,11 @@ static int tcpm_start_drp_toggling(struct tcpc_dev *dev,
 	int ret;
 
 	mutex_lock(&pd->lock);
+
+	/* Make CC be configurable */
+	ret = vote(pd->disable_pr_switch, DISABLE_CC_VOTER, false, 0);
+	if (ret < 0)
+		pd_engine_log(pd, "unvote disable_pr_switch fail, ret %d", ret);
 
 	val.intval = POWER_SUPPLY_TYPEC_PR_DUAL;
 
@@ -2124,6 +2157,9 @@ struct usbpd *usbpd_create(struct device *parent)
 	if (ret < 0)
 		goto free_pd;
 
+	pd->wlc_supported = device_property_read_bool(parent,
+						      "goog,wlc-supported");
+
 	ret = pd_engine_debugfs_init(pd);
 	if (ret < 0)
 		goto del_pd;
@@ -2193,12 +2229,14 @@ struct usbpd *usbpd_create(struct device *parent)
 		goto del_wq;
 	}
 
-	pd->wireless_psy = power_supply_get_by_name("wireless");
-	if (!pd->wireless_psy) {
-		pd_engine_log(pd,
-			      "Could not get wireless power_supply, deferring probe");
-		ret = -EPROBE_DEFER;
-		goto put_psy_usb;
+	if (pd->wlc_supported) {
+		pd->wireless_psy = power_supply_get_by_name("wireless");
+		if (!pd->wireless_psy) {
+			pd_engine_log(pd,
+				      "Could not get wireless power_supply, deferring probe");
+			ret = -EPROBE_DEFER;
+			goto put_psy_usb;
+		}
 	}
 
 	pd->usb_icl_votable = find_votable("USB_ICL");
@@ -2217,9 +2255,18 @@ struct usbpd *usbpd_create(struct device *parent)
 		goto put_psy_wireless;
 	}
 
+	pd->disable_pr_switch = find_votable("DISABLE_POWER_ROLE_SWITCH");
+	if (pd->disable_pr_switch == NULL) {
+		pd_engine_log(pd,
+			      "Couldn't find DISABLE_POWER_ROLE_SWITCH votable, deferring");
+		ret = -EPROBE_DEFER;
+		goto put_psy_wireless;
+	}
+
 	/* initialize votable */
 	vote(pd->usb_icl_votable, OTG_ICL_VOTER, false, 0);
 	vote(pd->apsd_disable_votable, OTG_DISABLE_APSD_VOTER, false, 0);
+	vote(pd->disable_pr_switch, DISABLE_CC_VOTER, false, 0);
 
 	pd->ext_vbus_nb.notifier_call = update_ext_vbus;
 	ext_vbus_register_notify(&pd->ext_vbus_nb);
@@ -2255,7 +2302,8 @@ unreg_tcpm:
 	tcpm_unregister_port(pd->tcpm_port);
 put_psy_wireless:
 	ext_vbus_unregister_notify(&pd->ext_vbus_nb);
-	power_supply_put(pd->wireless_psy);
+	if (pd->wlc_supported)
+		power_supply_put(pd->wireless_psy);
 put_psy_usb:
 	power_supply_put(pd->usb_psy);
 del_wq:
@@ -2285,7 +2333,8 @@ void usbpd_destroy(struct usbpd *pd)
 	power_supply_unreg_notifier(&pd->psy_nb);
 	tcpm_unregister_port(pd->tcpm_port);
 	ext_vbus_unregister_notify(&pd->ext_vbus_nb);
-	power_supply_put(pd->wireless_psy);
+	if (pd->wlc_supported)
+		power_supply_put(pd->wireless_psy);
 	power_supply_put(pd->usb_psy);
 	destroy_workqueue(pd->wq);
 	pd_engine_debugfs_exit(pd);

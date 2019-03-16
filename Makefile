@@ -363,7 +363,7 @@ CHECK		= sparse
 
 # Use the wrapper for the compiler.  This wrapper scans for new
 # warnings and causes the build to stop upon encountering them
-CC		= $(srctree)/scripts/gcc-wrapper.py $(REAL_CC)
+CC		= $(PYTHON) $(srctree)/scripts/gcc-wrapper.py $(REAL_CC)
 
 CHECKFLAGS     := -D__linux__ -Dlinux -D__STDC__ -Dunix -D__unix__ \
 		  -Wbitwise -Wno-return-void $(CF)
@@ -513,8 +513,11 @@ endif
 
 ifeq ($(cc-name),clang)
 ifneq ($(CROSS_COMPILE),)
-CLANG_TRIPLE    ?= $(CROSS_COMPILE)
+CLANG_TRIPLE	?= $(CROSS_COMPILE)
 CLANG_FLAGS	:= --target=$(notdir $(CLANG_TRIPLE:%-=%))
+ifeq ($(shell $(srctree)/scripts/clang-android.sh $(CC) $(CLANG_FLAGS)), y)
+$(error "Clang with Android --target detected. Did you specify CLANG_TRIPLE?")
+endif
 GCC_TOOLCHAIN_DIR := $(dir $(shell which $(LD)))
 CLANG_FLAGS	+= --prefix=$(GCC_TOOLCHAIN_DIR)
 GCC_TOOLCHAIN	:= $(realpath $(GCC_TOOLCHAIN_DIR)/..)
@@ -643,6 +646,8 @@ ifdef CONFIG_LTO_CLANG
 LDFINAL_vmlinux := $(LD)
 LD		:= $(LDGOLD)
 LDFLAGS		+= -plugin LLVMgold.so
+LDFLAGS		+= -plugin-opt=-function-sections
+LDFLAGS		+= -plugin-opt=-data-sections
 # use llvm-ar for building symbol tables from IR files, and llvm-dis instead
 # of objdump for processing symbol versions and exports
 LLVM_AR		:= llvm-ar
@@ -652,7 +657,9 @@ endif
 
 KBUILD_CFLAGS	+= $(call cc-option,-fno-PIE)
 KBUILD_AFLAGS	+= $(call cc-option,-fno-PIE)
-CFLAGS_GCOV	:= -fprofile-arcs -ftest-coverage -fno-tree-loop-im $(call cc-disable-warning,maybe-uninitialized,)
+CFLAGS_GCOV	:= -fprofile-arcs -ftest-coverage \
+	$(call cc-option,-fno-tree-loop-im) \
+	$(call cc-disable-warning,maybe-uninitialized,)
 CFLAGS_KCOV	:= $(call cc-option,-fsanitize-coverage=trace-pc,)
 export CFLAGS_GCOV CFLAGS_KCOV
 
@@ -722,28 +729,11 @@ DISABLE_LTO	+= $(DISABLE_CFI)
 export DISABLE_CFI
 endif
 
-ifdef CONFIG_SAFESTACK
-safestack-flags	+= -fsanitize=safe-stack
-safestack-extra-flags += -mllvm -safestack-use-pointer-address
-
-ifdef CONFIG_SAFESTACK_COLORING
-safestack-extra-flags += -mllvm -safe-stack-coloring=1
-endif
-
-ifdef CONFIG_LTO_CLANG
-# if we use LLVMgold, pass extra flags to ld.gold
-LDFLAGS		+= -plugin-opt=-safestack-use-pointer-address
-
-ifdef CONFIG_SAFESTACK_COLORING
-LDFLAGS		+= -plugin-opt=-safe-stack-coloring=1
-endif
-endif
-
-# safestack-flags are re-tested in prepare-compiler-check
-KBUILD_CFLAGS	+= $(call cc-option, $(safestack-flags))
-KBUILD_CFLAGS	+= $(call cc-option, $(safestack-extra-flags))
-DISABLE_SAFESTACK := -fno-sanitize=safe-stack
-export DISABLE_SAFESTACK
+ifdef CONFIG_SHADOW_CALL_STACK
+scs-flags	:= -fsanitize=shadow-call-stack
+KBUILD_CFLAGS	+= $(scs-flags)
+DISABLE_SCS	:= -fno-sanitize=shadow-call-stack
+export DISABLE_SCS
 endif
 
 ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
@@ -1226,10 +1216,9 @@ ifdef cfi-flags
 	@echo Cannot use CONFIG_CFI: $(cfi-flags) not supported by compiler >&2 && exit 1
   endif
 endif
-ifdef safestack-flags
-  ifeq ($(call cc-option, $(safestack-flags)),)
-	@echo Cannot use CONFIG_SAFESTACK: $(safestack-flags) not supported by \
-		compiler >&2 && exit 1
+ifdef scs-flags
+  ifeq ($(call cc-option, $(scs-flags)),)
+	@echo Cannot use CONFIG_SHADOW_CALL_STACK: $(scs-flags) not supported by compiler >&2 && exit 1
   endif
 endif
 	@:

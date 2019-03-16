@@ -166,7 +166,7 @@ config ARCH_USE_BUILTIN_BSWAP
 
 config KRETPROBES
 	def_bool y
-	depends on KPROBES && HAVE_KRETPROBES
+	depends on KPROBES && HAVE_KRETPROBES && ROP_PROTECTION_NONE
 
 config USER_RETURN_NOTIFIER
 	bool
@@ -530,6 +530,7 @@ config LTO_CLANG
 	bool "Use clang Link Time Optimization (LTO) (EXPERIMENTAL)"
 	depends on ARCH_SUPPORTS_LTO_CLANG
 	depends on !FTRACE_MCOUNT_RECORD || HAVE_C_RECORDMCOUNT
+	depends on !KASAN
 	select LTO
 	select THIN_ARCHIVES
 	select LD_DEAD_CODE_DATA_ELIMINATION
@@ -574,31 +575,36 @@ config CFI_CLANG_SHADOW
 	  If you select this option, the kernel builds a fast look-up table of
 	  CFI check functions in loaded modules to reduce overhead.
 
-config ARCH_SUPPORTS_SAFESTACK
+config ARCH_SUPPORTS_SHADOW_CALL_STACK
 	bool
 	help
-	  An architecture should select this if it supports clang SafeStack,
-	  has asm/safestack.h, and implements __safestack_pointer_address().
+	  An architecture should select this if it supports clang's Shadow
+	  Call Stack, has asm/scs.h, and implements runtime support for shadow
+	  stack switching.
 
-config SAFESTACK
-	bool "Use clang SafeStack"
-	depends on ARCH_SUPPORTS_SAFESTACK
+choice
+	prompt "Return-oriented programming (ROP) protection"
+	default ROP_PROTECTION_NONE
 	help
-	  This option enables clang SafeStack, which protects function return
-	  addresses against attacks based on stack buffer overflows.
+	  This option controls kernel protections against return-oriented
+	  programming (ROP) attacks, which involve overwriting function return
+	  addresses.
 
-	  SafeStack splits the kernel stack into safe and unsafe parts. Safe
-	  stack is used only for data that's at compile time determined to be
-	  only accessed in a safe way. This prevents a buffer overflow in the
-	  unsafe stack from overwriting any data in the safe stack, including
-	  the return address.
+config ROP_PROTECTION_NONE
+	bool "None"
 
-config SAFESTACK_COLORING
-	bool "Use clang SafeStack coloring (EXPERIMENTAL)"
-	depends on SAFESTACK
+config SHADOW_CALL_STACK
+	bool "clang Shadow Call Stack (EXPERIMENTAL)"
+	depends on ARCH_SUPPORTS_SHADOW_CALL_STACK
 	help
-	  This option enables clang SafeStack coloring, which reduces unsafe
-	  stack usage.
+	  This option enables clang's Shadow Call Stack, which uses a shadow
+	  stack to protect function return addresses from being overwritten by
+	  an attacker. More information can be found from clang's
+	  documentation:
+
+	    https://clang.llvm.org/docs/ShadowCallStack.html
+
+endchoice
 
 config HAVE_ARCH_WITHIN_STACK_FRAMES
 	bool

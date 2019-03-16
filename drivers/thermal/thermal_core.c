@@ -39,6 +39,7 @@
 #include <net/genetlink.h>
 #include <linux/suspend.h>
 #include <linux/kobject.h>
+#include <../base/base.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/thermal.h>
@@ -1834,6 +1835,14 @@ __thermal_cooling_device_register(struct device_node *np,
 	if (cdev_softlink_kobj == NULL) {
 		cdev_softlink_kobj = kobject_create_and_add("cdev-by-name",
 						cdev->device.kobj.parent);
+		result = sysfs_create_link(&cdev->device.class->p->subsys.kobj,
+							cdev_softlink_kobj,
+							"cdev-by-name");
+		if (result) {
+			dev_err(&cdev->device,
+				"Fail to create cdev_map "
+				"soft link in class\n");
+		}
 	}
 	mutex_unlock(&cdev_softlink_lock);
 
@@ -2218,18 +2227,6 @@ struct thermal_zone_device *thermal_zone_device_register(const char *type,
 		return ERR_PTR(result);
 	}
 
-	mutex_lock(&tz_softlink_lock);
-	if (tz_softlink_kobj == NULL) {
-		tz_softlink_kobj = kobject_create_and_add("tz-by-name",
-						tz->device.kobj.parent);
-	}
-	mutex_unlock(&tz_softlink_lock);
-
-	result = sysfs_create_link(tz_softlink_kobj,
-				&tz->device.kobj, tz->type);
-	if (result)
-		dev_err(&tz->device, "Fail to create tz_map soft link\n");
-
 	/* sys I/F */
 	if (type) {
 		result = device_create_file(&tz->device, &dev_attr_type);
@@ -2332,6 +2329,26 @@ struct thermal_zone_device *thermal_zone_device_register(const char *type,
 	/* Update the new thermal zone and mark it as already updated. */
 	if (atomic_cmpxchg(&tz->need_update, 1, 0))
 		thermal_zone_device_update(tz, THERMAL_EVENT_UNSPECIFIED);
+
+	/* Create softlink now */
+	mutex_lock(&tz_softlink_lock);
+	if (tz_softlink_kobj == NULL) {
+		tz_softlink_kobj = kobject_create_and_add("tz-by-name",
+						tz->device.kobj.parent);
+		result = sysfs_create_link(&tz->device.class->p->subsys.kobj,
+							tz_softlink_kobj,
+							"tz-by-name");
+		if (result) {
+			dev_err(&tz->device,
+				"Fail to create tz_map soft link in class\n");
+		}
+	}
+	mutex_unlock(&tz_softlink_lock);
+
+	result = sysfs_create_link(tz_softlink_kobj,
+				&tz->device.kobj, tz->type);
+	if (result)
+		dev_err(&tz->device, "Fail to create tz_map soft link\n");
 
 	return tz;
 

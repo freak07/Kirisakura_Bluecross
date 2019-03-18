@@ -591,11 +591,6 @@ void wcd_mbhc_report_plug(struct wcd_mbhc *mbhc, int insertion,
 		}
 
 		if (mbhc->micbias_enable) {
-			if (rt5514_notifier.cb_func)
-				rt5514_notifier.cb_func(rt5514_notifier.codec,
-						RT5514_SWITCH_MIC1);
-			if (mbhc->mbhc_cb->switch_mic_mb)
-				mbhc->mbhc_cb->switch_mic_mb(codec, RT5514_SWITCH_MIC1);
 			if (mbhc->mbhc_cb->mbhc_micbias_control)
 				mbhc->mbhc_cb->mbhc_micbias_control(
 						codec, MIC_BIAS_2,
@@ -611,6 +606,11 @@ void wcd_mbhc_report_plug(struct wcd_mbhc *mbhc, int insertion,
 			mbhc->micbias_enable = false;
 		}
 
+		if (rt5514_notifier.cb_func && mbhc->mbhc_cb->switch_mic_mb) {
+			rt5514_notifier.cb_func(rt5514_notifier.codec,
+					RT5514_SWITCH_MIC1);
+			mbhc->mbhc_cb->switch_mic_mb(codec, RT5514_SWITCH_MIC1);
+		}
 		mbhc->hph_type = WCD_MBHC_HPH_NONE;
 		mbhc->zl = mbhc->zr = 0;
 		pr_info("%s: Reporting removal %d(%x)\n", __func__,
@@ -735,20 +735,11 @@ void wcd_mbhc_report_plug(struct wcd_mbhc *mbhc, int insertion,
 
 		mbhc->hph_status |= jack_type;
 
-		if (mbhc->micbias_enable) {
-			if (rt5514_notifier.cb_func)
-				rt5514_notifier.cb_func(rt5514_notifier.codec,
-						RT5514_SWITCH_MIC2);
-			if (mbhc->mbhc_cb->switch_mic_mb)
-				mbhc->mbhc_cb->switch_mic_mb(codec, RT5514_SWITCH_MIC2);
-		} else {
-			if (rt5514_notifier.cb_func)
-				rt5514_notifier.cb_func(rt5514_notifier.codec,
-						RT5514_SWITCH_MIC1);
-			if (mbhc->mbhc_cb->switch_mic_mb)
-				mbhc->mbhc_cb->switch_mic_mb(codec, RT5514_SWITCH_MIC1);
+		if (rt5514_notifier.cb_func && mbhc->mbhc_cb->switch_mic_mb) {
+			rt5514_notifier.cb_func(rt5514_notifier.codec,
+					RT5514_SWITCH_MIC2);
+			mbhc->mbhc_cb->switch_mic_mb(codec, RT5514_SWITCH_MIC2);
 		}
-
 		pr_info("%s: Reporting insertion %d(%x)\n", __func__,
 			 jack_type, mbhc->hph_status);
 		wcd_mbhc_jack_report(mbhc, &mbhc->headset_jack,

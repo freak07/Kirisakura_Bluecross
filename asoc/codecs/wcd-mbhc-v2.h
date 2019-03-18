@@ -508,6 +508,7 @@ struct wcd_mbhc_cb {
 				 bool enable, int anc_num);
 	bool (*is_anc_on)(struct wcd_mbhc *mbhc);
 	bool (*switch_mic_mb)(struct snd_soc_codec *codec, int mic);
+	void (*set_micbias_value_dynamic)(struct snd_soc_codec *, int micbias_mv);
 };
 
 struct wcd_mbhc_fn {

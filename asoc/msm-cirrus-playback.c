@@ -174,7 +174,6 @@ static void *crus_gen_afe_set_header(int length, int port, int module,
 static int crus_afe_get_param(int port, int module, int param, int length,
 			      void *data)
 {
-	const int scale_factor = 100000000;
 	struct afe_custom_crus_get_config_t *config = NULL;
 	int index = afe_get_port_index(port);
 	int ret = 0, count = 0;
@@ -226,15 +225,6 @@ static int crus_afe_get_param(int port, int module, int param, int length,
 			ret = -EINVAL;
 			goto crus_sp_get_param_err;
 		}
-	}
-
-	if (param == CRUS_PARAM_RX_GET_TEMP) {
-		pr_info("%s: left impedance %d.%d ohms", __func__,
-				crus_spk.imp_l / scale_factor,
-				crus_spk.imp_l % scale_factor);
-		pr_info("%s: right impedance %d.%d ohms", __func__,
-				crus_spk.imp_r / scale_factor,
-				crus_spk.imp_r % scale_factor);
 	}
 
 	/* Copy from dynamic buffer to return buffer */
@@ -1116,6 +1106,7 @@ static void msm_crus_check_calibration_value(void)
 int msm_crus_store_imped(char channel)
 {
 	/* cs35l36 speaker amp constant value */
+	const int scale_factor = 100000000;
 	const int amp_factor = 71498;
 	int32_t buffer[96] = {0};
 	int out_cal0;
@@ -1137,8 +1128,9 @@ int msm_crus_store_imped(char channel)
 
 		crus_spk.imp_l =  buffer[3] * amp_factor;
 
-		pr_debug("%s: left impedance %d", __func__,
-				crus_spk.imp_l);
+		pr_info("%s: left impedance %d.%d ohms", __func__,
+				crus_spk.imp_l / scale_factor,
+				crus_spk.imp_l % scale_factor);
 
 	} else if (channel == 'r') {
 		out_cal0 = buffer[14];
@@ -1149,8 +1141,9 @@ int msm_crus_store_imped(char channel)
 
 		crus_spk.imp_r = buffer[1] * amp_factor;
 
-		pr_debug("%s: right impedance %d", __func__,
-				crus_spk.imp_r);
+		pr_info("%s: right impedance %d.%d ohms", __func__,
+				crus_spk.imp_r / scale_factor,
+				crus_spk.imp_r % scale_factor);
 
 	} else
 		pr_err("%s: unknown channel", __func__);

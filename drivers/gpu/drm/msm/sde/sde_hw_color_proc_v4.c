@@ -198,7 +198,8 @@ void sde_setup_dspp_pccv4(struct sde_hw_dspp *ctx, void *cfg)
 	struct drm_msm_pcc *pcc_cfg;
 	struct drm_msm_pcc_coeff *coeffs = NULL;
 	int i = 0;
-	int kcal_min = 20;
+	int kcal_min = 60;
+	int kcal_min_safe = 30;
 	u32 base = 0;
 	u32 opcode = 0, local_opcode = 0;
 
@@ -207,12 +208,12 @@ void sde_setup_dspp_pccv4(struct sde_hw_dspp *ctx, void *cfg)
 		return;
 	}
 
-	if (kcal_red < kcal_min)
+	if ((kcal_green < kcal_min_safe) && (kcal_blue < kcal_min_safe) && (kcal_red < kcal_min))
 		kcal_red = kcal_min;
-	if (kcal_green < kcal_min)
-		kcal_green = kcal_min;
-	if (kcal_blue < kcal_min)
+	if ((kcal_green < kcal_min_safe) && (kcal_red < kcal_min_safe) && (kcal_blue < kcal_min))
 		kcal_blue = kcal_min;
+	if ((kcal_blue < kcal_min_safe) && (kcal_red < kcal_min_safe) && (kcal_green < kcal_min))
+		kcal_green = kcal_min;
 
 	if (!hw_cfg->payload) {
 		DRM_DEBUG_DRIVER("disable pcc feature\n");

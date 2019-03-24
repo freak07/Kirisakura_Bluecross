@@ -20,7 +20,7 @@
 #define MAX_SCALE       256
 
 // SCALE_VAL_MIN : Minimum value of RGB recommended
-#define SCALE_VAL_MIN   20
+#define SCALE_VAL_MIN   0
 
 // MAX_BRIGHTNESS : Maximum value of the display brightness/backlight
 #define MAX_BRIGHTNESS  1023

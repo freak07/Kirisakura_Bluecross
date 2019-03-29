@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2019 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -949,6 +949,8 @@ static void hdd_save_bss_info(hdd_adapter_t *adapter,
 	} else {
 		hdd_sta_ctx->conn_info.conn_flag.vht_op_present = false;
 	}
+	qdf_mem_zero(&hdd_sta_ctx->ibss_enc_key,
+		     sizeof(hdd_sta_ctx->ibss_enc_key));
 }
 
 /**
@@ -1754,6 +1756,7 @@ static QDF_STATUS hdd_dis_connect_handler(hdd_adapter_t *pAdapter,
 
 	hdd_wmm_adapter_clear(pAdapter);
 	sme_ft_reset(WLAN_HDD_GET_HAL_CTX(pAdapter), pAdapter->sessionId);
+	sme_reset_key(WLAN_HDD_GET_HAL_CTX(pAdapter), pAdapter->sessionId);
 	if (hdd_remove_beacon_filter(pAdapter) != 0)
 		hdd_err("hdd_remove_beacon_filter() failed");
 
@@ -3158,7 +3161,9 @@ static QDF_STATUS hdd_association_completion_handler(hdd_adapter_t *pAdapter,
 				pRoamInfo ?
 				pRoamInfo->bssid.bytes :
 				pWextState->req_bssId.bytes);
-			connect_timeout = true;
+			if (roamResult !=
+			    eCSR_ROAM_RESULT_SCAN_FOR_SSID_FAILURE)
+				connect_timeout = true;
 		}
 
 		/*
@@ -3232,6 +3237,8 @@ static QDF_STATUS hdd_association_completion_handler(hdd_adapter_t *pAdapter,
 						timeout_reason);
 			}
 			hdd_clear_roam_profile_ie(pAdapter);
+			sme_reset_key(WLAN_HDD_GET_HAL_CTX(pAdapter),
+				      pAdapter->sessionId);
 		} else  if ((eCSR_ROAM_CANCELLED == roamStatus
 		    && !hddDisconInProgress)) {
 				hdd_connect_result(dev,

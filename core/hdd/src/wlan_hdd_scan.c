@@ -437,6 +437,32 @@ static int hdd_add_scan_event_from_ies(struct hdd_scan_info *scanInfo,
 	return 0;
 }
 
+void hdd_init_scan_reject_params(hdd_context_t *hdd_ctx)
+{
+	if (hdd_ctx) {
+		hdd_ctx->last_scan_reject_timestamp = 0;
+		hdd_ctx->last_scan_reject_session_id = 0xFF;
+		hdd_ctx->last_scan_reject_reason = 0;
+		hdd_ctx->scan_reject_cnt = 0;
+	}
+
+	return;
+}
+
+void hdd_reset_scan_reject_params(hdd_context_t *hdd_ctx,
+				 eRoamCmdStatus roam_status,
+				 eCsrRoamResult roam_result)
+{
+
+	if ((roam_status == eCSR_ROAM_ASSOCIATION_FAILURE) ||
+	    (roam_status == eCSR_ROAM_CANCELLED) ||
+	    (roam_result == eCSR_ROAM_RESULT_ASSOCIATED)) {
+		hdd_debug("Reset scan reject params");
+		hdd_init_scan_reject_params(hdd_ctx);
+	}
+
+	return;
+}
 
 /**
  * hdd_indicate_scan_result() - indicate scan results
@@ -2112,19 +2138,20 @@ static int __wlan_hdd_cfg80211_scan(struct wiphy *wiphy,
 		    !pHddCtx->last_scan_reject_timestamp) {
 			pHddCtx->last_scan_reject_session_id = curr_session_id;
 			pHddCtx->last_scan_reject_reason = curr_reason;
-			pHddCtx->last_scan_reject_timestamp =
-				jiffies_to_msecs(jiffies) +
-				SCAN_REJECT_THRESHOLD_TIME;
+			pHddCtx->last_scan_reject_timestamp = jiffies +
+				msecs_to_jiffies(SCAN_REJECT_THRESHOLD_TIME);
 			pHddCtx->scan_reject_cnt = 0;
 		} else {
 			pHddCtx->scan_reject_cnt++;
 			if ((pHddCtx->scan_reject_cnt >=
 			   SCAN_REJECT_THRESHOLD) &&
-			   qdf_system_time_after(jiffies_to_msecs(jiffies),
+			   qdf_system_time_after(jiffies,
 			   pHddCtx->last_scan_reject_timestamp)) {
-				hdd_err("scan reject threshold reached Session %d Reason %d count %d",
+				hdd_err("scan reject threshold reached Session %d Reason %d count %d reject timestamp %lu jiffies %lu",
 					curr_session_id, curr_reason,
-					pHddCtx->scan_reject_cnt);
+					pHddCtx->scan_reject_cnt,
+					pHddCtx->last_scan_reject_timestamp,
+					jiffies);
 				pHddCtx->last_scan_reject_timestamp = 0;
 				pHddCtx->scan_reject_cnt = 0;
 				if (pHddCtx->config->enable_fatal_event) {
@@ -2145,10 +2172,9 @@ static int __wlan_hdd_cfg80211_scan(struct wiphy *wiphy,
 		}
 		return -EBUSY;
 	}
-	pHddCtx->last_scan_reject_timestamp = 0;
-	pHddCtx->last_scan_reject_session_id = 0xFF;
-	pHddCtx->last_scan_reject_reason = 0;
-	pHddCtx->scan_reject_cnt = 0;
+
+	/* reinit the scan reject params */
+	hdd_init_scan_reject_params(pHddCtx);
 
 	/* Check whether SAP scan can be skipped or not */
 	if (pAdapter->device_mode == QDF_SAP_MODE &&

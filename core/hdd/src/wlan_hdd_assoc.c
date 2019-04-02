@@ -62,6 +62,7 @@
 #include "wlan_hdd_napi.h"
 #include <wlan_logging_sock_svc.h>
 #include "wlan_hdd_tsf.h"
+#include "wlan_hdd_scan.h"
 
 /* These are needed to recognize WPA and RSN suite types */
 #define HDD_WPA_OUI_SIZE 4
@@ -1937,6 +1938,9 @@ QDF_STATUS hdd_change_peer_state(hdd_adapter_t *pAdapter,
 #endif
 
 	if (sta_state == OL_TXRX_PEER_STATE_AUTH) {
+		/* Reset scan reject params on successful set key */
+		hdd_debug("Reset scan reject params");
+		hdd_init_scan_reject_params(pAdapter->pHddCtx);
 #ifdef QCA_LL_LEGACY_TX_FLOW_CONTROL
 		/* make sure event is reset */
 		INIT_COMPLETION(pAdapter->sta_authorized_event);
@@ -2607,6 +2611,12 @@ static QDF_STATUS hdd_association_completion_handler(hdd_adapter_t *pAdapter,
 		hdd_err("config is NULL");
 		return QDF_STATUS_E_NULL_VALUE;
 	}
+
+	/*
+	 * reset scan reject params if connection is success or we received
+	 * final failure from CSR after trying with all APs.
+	 */
+	hdd_reset_scan_reject_params(pHddCtx, roamStatus, roamResult);
 
 	/*
 	 * Enable roaming on other STA iface except this one.

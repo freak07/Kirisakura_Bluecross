@@ -827,7 +827,7 @@ static const struct snd_kcontrol_new rt5514_snd_controls[] = {
 		adc_vol_tlv),
 	SOC_SINGLE_EXT("DSP Voice Wake Up", SND_SOC_NOPM, 0, 3, 0,
 		rt5514_dsp_voice_wake_up_get, rt5514_dsp_voice_wake_up_put),
-	SND_SOC_BYTES_TLV("Hotword Model", 0x6800, NULL,
+	SND_SOC_BYTES_TLV("Hotword Model", 0x20000, NULL,
 		rt5514_hotword_model_put),
 	SND_SOC_BYTES_TLV("Musdet Model", 0x5c00, NULL,
 		rt5514_musdet_model_put),

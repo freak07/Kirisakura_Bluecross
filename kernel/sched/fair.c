@@ -167,7 +167,7 @@ unsigned int sysctl_sched_capacity_margin_down = 1205; /* ~15% margin */
 #define capacity_margin sysctl_sched_capacity_margin
 
 #ifdef CONFIG_SCHED_WALT
-unsigned int sysctl_sched_min_task_util_for_boost_colocation;
+unsigned int sysctl_sched_min_task_util_for_boost_colocation = 1;
 #endif
 
 static inline void update_load_add(struct load_weight *lw, unsigned long inc)

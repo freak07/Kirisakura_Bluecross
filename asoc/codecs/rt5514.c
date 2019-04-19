@@ -139,8 +139,8 @@ static void rt5514_enable_dsp_prepare(struct rt5514_priv *rt5514)
 	regmap_write(rt5514->i2c_regmap, 0xfafafafa, 0x00000000);
 	/* PIN config */
 	regmap_write(rt5514->i2c_regmap, 0x18002070, 0x00000040);
-	/* PLL3(QN)=RCOSC*(10+2) */
-	regmap_write(rt5514->i2c_regmap, 0x18002240, 0x0000000a);
+	/* PLL3(QN)=RCOSC*(22+2) */
+	regmap_write(rt5514->i2c_regmap, 0x18002240, 0x00000016);
 	/* PLL3 source=RCOSC, fsi=rt_clk */
 	regmap_write(rt5514->i2c_regmap, 0x18002100, 0x0000000b);
 	/* Power on RCOSC, pll3 */
@@ -654,7 +654,7 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
 				int ret;
 
-				ret = rt5514_spi_burst_write(0x4ffb3000,
+				ret = rt5514_spi_burst_write(0x4ffb4800,
 					rt5514->musdet_model_buf,
 					rt5514->musdet_model_len);
 				if (ret) {
@@ -671,7 +671,7 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 						 codec->dev);
 				if (fw) {
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
-					rt5514_spi_burst_write(0x4ffb3000,
+					rt5514_spi_burst_write(0x4ffb4800,
 						fw->data, fw->size);
 #else
 					dev_err(codec->dev,
@@ -720,7 +720,7 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 				}
 
 				if (rt5514_fw_validate(rt5514, RT5514_FIRMWARE4,
-					0x4ffb3000)) {
+					0x4ffb4800)) {
 					rt5514->dsp_enabled = 0;
 					regmap_multi_reg_write(
 						rt5514->i2c_regmap,
@@ -827,7 +827,7 @@ static const struct snd_kcontrol_new rt5514_snd_controls[] = {
 		adc_vol_tlv),
 	SOC_SINGLE_EXT("DSP Voice Wake Up", SND_SOC_NOPM, 0, 3, 0,
 		rt5514_dsp_voice_wake_up_get, rt5514_dsp_voice_wake_up_put),
-	SND_SOC_BYTES_TLV("Hotword Model", 0x6800, NULL,
+	SND_SOC_BYTES_TLV("Hotword Model", 0x20000, NULL,
 		rt5514_hotword_model_put),
 	SND_SOC_BYTES_TLV("Musdet Model", 0x5c00, NULL,
 		rt5514_musdet_model_put),

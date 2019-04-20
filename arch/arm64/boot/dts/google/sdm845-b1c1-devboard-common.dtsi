@@ -131,7 +131,7 @@
 	fps-therm-adc {
 		status = "disabled";
 	};
-	usbc-therm-monitor {
+	usbc-therm-adc {
 		status = "disabled";
 	};
 	pmi_therm-adc {

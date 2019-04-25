@@ -22,7 +22,10 @@
 #include <asm/smp_plat.h>
 #include <asm/fixmap.h>
 #include "platsmp.h"
-
+#ifdef CONFIG_MSM_PM_LEGACY
+#include <soc/qcom/pm-legacy.h>
+#endif
+#include <soc/qcom/scm-boot.h>
 #define MSM_APCS_IDR 0x0B011030
 
 /* Base Address of APC IPC block */
@@ -62,10 +65,18 @@ static void qcom_cpu_die(unsigned int cpu)
 {
 	wfi();
 }
+
+static bool qcom_cpu_can_disable(unsigned int cpu)
+{
+	return true; /*Hotplug of any CPU is supported */
+}
 #endif
 
 static void qcom_secondary_init(unsigned int cpu)
 {
+#ifdef CONFIG_MSM_PM_LEGACY
+	WARN_ON(msm_platform_secondary_init(cpu));
+#endif
 	/*
 	 * Synchronise with the boot thread.
 	 */
@@ -423,10 +434,19 @@ static int kpssv2_boot_secondary(unsigned int cpu, struct task_struct *idle)
 
 static void __init qcom_smp_prepare_cpus(unsigned int max_cpus)
 {
-	int cpu;
+	int cpu, map;
+	u32 aff0_mask = 0;
+	u32 aff1_mask = 0;
+	u32 aff2_mask = 0;
 
-	if (qcom_scm_set_cold_boot_addr(secondary_startup_arm,
-					cpu_present_mask)) {
+	for_each_present_cpu(cpu) {
+		map = cpu_logical_map(cpu);
+		aff0_mask |= BIT(MPIDR_AFFINITY_LEVEL(map, 0));
+		aff1_mask |= BIT(MPIDR_AFFINITY_LEVEL(map, 1));
+		aff2_mask |= BIT(MPIDR_AFFINITY_LEVEL(map, 2));
+	}
+	if (scm_set_boot_addr_mc(virt_to_phys(secondary_startup_arm),
+		aff0_mask, aff1_mask, aff2_mask, SCM_FLAG_COLDBOOT_MC)) {
 		for_each_present_cpu(cpu) {
 			if (cpu == smp_processor_id())
 				continue;
@@ -472,7 +492,13 @@ struct smp_operations msm8909_smp_ops __initdata = {
 	.smp_secondary_init = qcom_secondary_init,
 	.smp_boot_secondary = msm8909_boot_secondary,
 #ifdef CONFIG_HOTPLUG_CPU
+#ifdef CONFIG_MSM_PM_LEGACY
+	.cpu_die		= qcom_cpu_die_legacy,
+	.cpu_kill		= qcom_cpu_kill_legacy,
+#else
 	.cpu_die		= qcom_cpu_die,
+#endif
+	.cpu_can_disable	= qcom_cpu_can_disable,
 #endif
 };
 

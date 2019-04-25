@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -16,6 +16,8 @@
 
 &blsp1_uart2 {
 	status = "ok";
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart_console_active>;
 };
 
 &sdhc_1 {
@@ -115,7 +117,7 @@
 	pinctrl-0 = <&sdc2_clk_on &sdc2_cmd_on &sdc2_data_on &sdc2_cd_on>;
 	pinctrl-1 = <&sdc2_clk_off &sdc2_cmd_off &sdc2_data_off>;
 
-	cd-gpios = <&tlmm 67 0x1>;
+	cd-gpios = <&tlmm 67 0x0>;
 
 	qcom,clk-rates = <400000 20000000 25000000 50000000 100000000
 								200000000>;
@@ -127,7 +129,7 @@
 &soc {
 	gpio_keys {
 		compatible = "gpio-keys";
-		input-name = "gpio-keys";
+		label = "gpio-keys";
 		pinctrl-names = "default";
 		pinctrl-0 = <&gpio_key_active>;
 
@@ -140,6 +142,24 @@
 			linux,can-disable;
 			gpio-key,wakeup;
 		};
+	};
+
+	fpc1020 {
+		compatible = "fpc,fpc1020";
+		interrupt-parent = <&tlmm>;
+		interrupts = <48 0>;
+		fpc,gpio_rst = <&tlmm 124 0x0>;
+		fpc,gpio_irq = <&tlmm 48 0>;
+		vcc_spi-supply = <&pm8953_l5>;
+		vdd_io-supply  = <&pm8953_l5>;
+		vdd_ana-supply = <&pm8953_l5>;
+		fpc,enable-on-boot;
+		pinctrl-names = "fpc1020_reset_reset",
+				"fpc1020_reset_active",
+				"fpc1020_irq_active";
+		pinctrl-0 = <&fpc_reset_low>;
+		pinctrl-1 = <&fpc_reset_high>;
+		pinctrl-2 = <&fpc_int_low>;
 	};
 };
 
@@ -305,7 +325,7 @@
 
 &dsi_hx8399c_hd_vid {
 	/delete-property/ qcom,mdss-dsi-panel-timings;
-	qcom,mdss-dsi-panel-timings-phy-12nm = [08 06 0a 02 00 04 02 08];
+	qcom,mdss-dsi-panel-timings-phy-12nm = [09 06 0a 02 00 05 02 08];
 	qcom,panel-supply-entries = <&dsi_panel_pwr_supply>;
 	qcom,mdss-dsi-bl-pmic-control-type = "bl_ctrl_pwm";
 	qcom,mdss-dsi-bl-pmic-pwm-frequency = <100>;
@@ -330,6 +350,12 @@
 #include "smb1355.dtsi"
 };
 
+&pmi632_vadc {
+	chan@4a {
+		qcom,scale-function = <22>;
+	};
+};
+
 &pmi632_gpios {
 	smb_en {
 		smb_en_default: smb_en_default {
@@ -347,16 +373,25 @@
 			bias-disable;		/* no-pull */
 		};
 	};
+
+	pmi632_ctm {
+		/* Disable GPIO1 for h/w base mitigation */
+		pmi632_ctm_default: pmi632_ctm_default {
+			pins = "gpio1";
+			bias-high-impedance;	/* disable the GPIO */
+			bias-disable;		/* no-pull */
+		};
+	};
 };
 
 &tlmm {
 	smb_int_default: smb_int_default {
 		mux {
-			pins = "gpio59";
+			pins = "gpio61";
 			function = "gpio";
 		};
 		config {
-			pins = "gpio59";
+			pins = "gpio61";
 			drive-strength = <2>;
 			bias-pull-up;
 			input-enable;
@@ -367,27 +402,36 @@
 &smb1355_0 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&smb_int_default
-		&smb_en_default &pmi632_sense_default>;
+		&smb_en_default &pmi632_sense_default &pmi632_ctm_default>;
 	interrupt-parent = <&tlmm>;
-	interrupts = <59 IRQ_TYPE_LEVEL_LOW>;
+	interrupts = <61 IRQ_TYPE_LEVEL_LOW>;
 	smb1355_charger_0: qcom,smb1355-charger@1000 {
 		status ="ok";
 		/delete-property/ io-channels;
 		/delete-property/ io-channels-names;
 		qcom,parallel-mode = <1>;
+		qcom,disable-ctm;
+		qcom,hw-die-temp-mitigation;
 	};
 };
 
 &smb1355_1 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&smb_int_default
-		&smb_en_default &pmi632_sense_default>;
+		&smb_en_default &pmi632_sense_default &pmi632_ctm_default>;
 	interrupt-parent = <&tlmm>;
-	interrupts = <59 IRQ_TYPE_LEVEL_LOW>;
+	interrupts = <61 IRQ_TYPE_LEVEL_LOW>;
 	smb1355_charger_1: qcom,smb1355-charger@1000 {
 		status ="ok";
 		/delete-property/ io-channels;
 		/delete-property/ io-channels-names;
 		qcom,parallel-mode = <1>;
+		qcom,disable-ctm;
+		qcom,hw-die-temp-mitigation;
 	};
+};
+
+&pmi632_charger {
+	qcom,thermal-mitigation = <4200000 3500000 3000000 2500000
+				2000000 1500000 1000000 500000>;
 };

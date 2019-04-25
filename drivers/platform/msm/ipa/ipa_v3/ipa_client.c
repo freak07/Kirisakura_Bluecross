@@ -63,7 +63,16 @@ int ipa3_enable_data_path(u32 clnt_hdl)
 	IPADBG("Enabling data path\n");
 	if (IPA_CLIENT_IS_CONS(ep->client)) {
 		memset(&holb_cfg, 0, sizeof(holb_cfg));
-		holb_cfg.en = IPA_HOLB_TMR_DIS;
+		/*
+		 * Set HOLB on USB DPL CONS to avoid IPA stall
+		 * if DPL client is not pulling the data
+		 * on other end from IPA hw.
+		 */
+		if ((ep->client == IPA_CLIENT_USB_DPL_CONS) ||
+				(ep->client == IPA_CLIENT_MHI_DPL_CONS))
+			holb_cfg.en = IPA_HOLB_TMR_EN;
+		else
+			holb_cfg.en = IPA_HOLB_TMR_DIS;
 		holb_cfg.tmr_val = 0;
 		res = ipa3_cfg_ep_holb(clnt_hdl, &holb_cfg);
 	}
@@ -635,6 +644,69 @@ int ipa3_smmu_map_peer_buff(u64 iova, u32 size, bool map, struct sg_table *sgt,
 	return 0;
 }
 
+void ipa3_register_lock_unlock_callback(int (*client_cb)(bool is_lock),
+						u32 ipa_ep_idx)
+{
+	struct ipa3_ep_context *ep;
+
+	IPADBG("entry\n");
+
+	ep = &ipa3_ctx->ep[ipa_ep_idx];
+
+	if (!ep->valid) {
+		IPAERR("Invalid EP\n");
+		return;
+	}
+
+	if (client_cb == NULL) {
+		IPAERR("Bad Param");
+		return;
+	}
+
+	ep->client_lock_unlock = client_cb;
+	IPADBG("exit\n");
+}
+
+void ipa3_deregister_lock_unlock_callback(u32 ipa_ep_idx)
+{
+	struct ipa3_ep_context *ep;
+
+	IPADBG("entry\n");
+
+	ep = &ipa3_ctx->ep[ipa_ep_idx];
+
+	if (!ep->valid) {
+		IPAERR("Invalid EP\n");
+		return;
+	}
+
+	if (ep->client_lock_unlock == NULL) {
+		IPAERR("client_lock_unlock is already NULL");
+		return;
+	}
+
+	ep->client_lock_unlock = NULL;
+	IPADBG("exit\n");
+}
+
+static void client_lock_unlock_cb(u32 ipa_ep_idx, bool is_lock)
+{
+	struct ipa3_ep_context *ep;
+
+	IPADBG("entry\n");
+
+	ep = &ipa3_ctx->ep[ipa_ep_idx];
+
+	if (!ep->valid) {
+		IPAERR("Invalid EP\n");
+		return;
+	}
+
+	if (ep->client_lock_unlock)
+		ep->client_lock_unlock(is_lock);
+
+	IPADBG("exit\n");
+}
 
 int ipa3_request_gsi_channel(struct ipa_request_gsi_channel_params *params,
 			     struct ipa_req_chan_out_params *out_params)
@@ -1259,6 +1331,104 @@ exit:
 	return result;
 }
 
+/*
+ * Set reset ep_delay for CLEINT PROD pipe
+ * Clocks, should be voted before calling this API
+ * locks should be taken before calling this API
+ */
+
+int ipa3_set_reset_client_prod_pipe_delay(bool set_reset,
+		enum ipa_client_type client)
+{
+	int result = 0;
+	int pipe_idx;
+	struct ipa3_ep_context *ep;
+	struct ipa_ep_cfg_ctrl ep_ctrl;
+
+	memset(&ep_ctrl, 0, sizeof(struct ipa_ep_cfg_ctrl));
+	ep_ctrl.ipa_ep_delay = set_reset;
+
+	if (IPA_CLIENT_IS_CONS(client)) {
+		IPAERR("client (%d) not PROD\n", client);
+		return -EINVAL;
+	}
+
+	pipe_idx = ipa3_get_ep_mapping(client);
+
+	if (pipe_idx == IPA_EP_NOT_ALLOCATED) {
+		IPAERR("client (%d) not valid\n", client);
+		return -EINVAL;
+	}
+
+	ep = &ipa3_ctx->ep[pipe_idx];
+
+	/* Setting delay on USB_PROD with skip_ep_cfg */
+	client_lock_unlock_cb(pipe_idx, true);
+	if (ep->valid && ep->skip_ep_cfg) {
+		ep->ep_delay_set = ep_ctrl.ipa_ep_delay;
+		result = ipa3_cfg_ep_ctrl(pipe_idx, &ep_ctrl);
+		if (result)
+			IPAERR("client (ep: %d) failed result=%d\n",
+				pipe_idx, result);
+		else
+			IPADBG("client (ep: %d) success\n", pipe_idx);
+	}
+	client_lock_unlock_cb(pipe_idx, false);
+	return result;
+}
+
+int ipa3_set_reset_client_cons_pipe_sus_holb(bool set_reset,
+		enum ipa_client_type client)
+{
+	int pipe_idx;
+	struct ipa3_ep_context *ep;
+	struct ipa_ep_cfg_ctrl ep_suspend;
+	struct ipa_ep_cfg_holb ep_holb;
+
+	memset(&ep_suspend, 0, sizeof(ep_suspend));
+	memset(&ep_holb, 0, sizeof(ep_holb));
+
+	ep_suspend.ipa_ep_suspend = set_reset;
+	ep_holb.tmr_val = 0;
+	ep_holb.en = set_reset;
+
+	if (IPA_CLIENT_IS_PROD(client)) {
+		IPAERR("client (%d) not CONS\n", client);
+		return -EINVAL;
+	}
+
+	pipe_idx = ipa3_get_ep_mapping(client);
+
+	if (pipe_idx == IPA_EP_NOT_ALLOCATED) {
+		IPAERR("client (%d) not valid\n", client);
+		return -EINVAL;
+	}
+
+	ep = &ipa3_ctx->ep[pipe_idx];
+	/* Setting sus/holb on MHI_CONS with skip_ep_cfg */
+	client_lock_unlock_cb(pipe_idx, true);
+	if (ep->valid && ep->skip_ep_cfg) {
+		if (ipa3_ctx->ipa_hw_type < IPA_HW_v4_0)
+			ipahal_write_reg_n_fields(
+					IPA_ENDP_INIT_CTRL_n,
+					pipe_idx, &ep_suspend);
+		/*
+		 * ipa3_cfg_ep_holb is not used here because we are
+		 * setting HOLB on Q6 pipes, and from APPS perspective
+		 * they are not valid, therefore, the above function
+		 * will fail.
+		 */
+		ipahal_write_reg_n_fields(
+			IPA_ENDP_INIT_HOL_BLOCK_TIMER_n,
+			pipe_idx, &ep_holb);
+		ipahal_write_reg_n_fields(
+			IPA_ENDP_INIT_HOL_BLOCK_EN_n,
+			pipe_idx, &ep_holb);
+	}
+	client_lock_unlock_cb(pipe_idx, false);
+	return 0;
+}
+
 void ipa3_xdci_ep_delay_rm(u32 clnt_hdl)
 {
 	struct ipa3_ep_context *ep;
@@ -1675,9 +1845,7 @@ int ipa3_clear_endpoint_delay(u32 clnt_hdl)
 	/* Set disconnect in progress flag so further flow control events are
 	 * not honored.
 	 */
-	spin_lock(&ipa3_ctx->disconnect_lock);
-	ep->disconnect_in_progress = true;
-	spin_unlock(&ipa3_ctx->disconnect_lock);
+	atomic_set(&ep->disconnect_in_progress, 1);
 
 	/* If flow is disabled at this point, restore the ep state.*/
 	ep_ctrl.ipa_ep_delay = false;

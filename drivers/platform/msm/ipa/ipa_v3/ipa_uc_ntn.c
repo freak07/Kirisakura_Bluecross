@@ -508,6 +508,8 @@ int ipa3_setup_uc_ntn_pipes(struct ipa_ntn_conn_in_params *in,
 		result = -EFAULT;
 		goto fail_smmu_map_dl;
 	}
+
+	IPA_ACTIVE_CLIENTS_DEC_SIMPLE();
 	IPADBG("client %d (ep: %d) connected\n", in->dl.client,
 		ipa_ep_idx_dl);
 
@@ -548,6 +550,9 @@ int ipa3_tear_down_uc_offload_pipes(int ipa_ep_idx_ul,
 			ep_ul->uc_offload_state, ep_dl->uc_offload_state);
 		return -EFAULT;
 	}
+
+	atomic_set(&ep_ul->disconnect_in_progress, 1);
+	atomic_set(&ep_dl->disconnect_in_progress, 1);
 
 	if (ipa3_ctx->ipa_hw_type >= IPA_HW_v4_0)
 		cmd.size = sizeof(*cmd_data_v4_0);

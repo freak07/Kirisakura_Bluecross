@@ -44,6 +44,7 @@
 			interrupt-names = "eoc-int-en-set";
 			qcom,adc-vdd-reference = <1875>;
 			qcom,adc-full-scale-code = <0x70e4>;
+			qcom,pmic-revid = <&pmi632_revid>;
 
 			chan@0 {
 				label = "ref_gnd";
@@ -289,20 +290,20 @@
 		pmi632_gpios: pinctrl@c000 {
 			compatible = "qcom,spmi-gpio";
 			reg = <0xc000 0x800>;
-			interrupts = <0x2 0xc1 0 IRQ_TYPE_NONE>,
+			interrupts = <0x2 0xc0 0 IRQ_TYPE_NONE>,
+					<0x2 0xc1 0 IRQ_TYPE_NONE>,
 					<0x2 0xc2 0 IRQ_TYPE_NONE>,
 					<0x2 0xc3 0 IRQ_TYPE_NONE>,
 					<0x2 0xc4 0 IRQ_TYPE_NONE>,
 					<0x2 0xc5 0 IRQ_TYPE_NONE>,
 					<0x2 0xc6 0 IRQ_TYPE_NONE>,
 					<0x2 0xc7 0 IRQ_TYPE_NONE>;
-			interrupt-names = "pmi632_gpio2", "pmi632_gpio3",
-					"pmi632_gpio4", "pmi632_gpio5",
-					"pmi632_gpio6", "pmi632_gpio7",
-					"pmi632_gpio8";
+			interrupt-names = "pmi632_gpio1", "pmi632_gpio2",
+					"pmi632_gpio3", "pmi632_gpio4",
+					"pmi632_gpio5", "pmi632_gpio6",
+					"pmi632_gpio7", "pmi632_gpio8";
 			gpio-controller;
 			#gpio-cells = <2>;
-			qcom,gpios-disallowed = <1>;
 		};
 
 		pmi632_charger: qcom,qpnp-smb5 {
@@ -316,6 +317,11 @@
 			qcom,auto-recharge-soc = <98>;
 			qcom,chg-vadc = <&pmi632_vadc>;
 			qcom,flash-disable-soc = <10>;
+			qcom,sw-jeita-enable;
+			qcom,step-charging-enable;
+			qcom,hw-die-temp-mitigation;
+			qcom,hw-connector-mitigation;
+			qcom,connector-internal-pull-kohm = <100>;
 
 			qcom,thermal-mitigation
 				= <3000000 2500000 2000000 1500000
@@ -392,7 +398,7 @@
 				interrupts =
 					<0x2 0x13 0x0 IRQ_TYPE_EDGE_BOTH>,
 					<0x2 0x13 0x1 IRQ_TYPE_EDGE_BOTH>,
-					<0x2 0x13 0x2 IRQ_TYPE_EDGE_BOTH>,
+					<0x2 0x13 0x2 IRQ_TYPE_EDGE_RISING>,
 					<0x2 0x13 0x3 IRQ_TYPE_EDGE_BOTH>,
 					<0x2 0x13 0x4 IRQ_TYPE_EDGE_BOTH>,
 					<0x2 0x13 0x5 IRQ_TYPE_EDGE_BOTH>,
@@ -525,6 +531,16 @@
 			compatible = "qcom,msm-bcl-soc";
 			#thermal-sensor-cells = <0>;
 		};
+
+		pmi632_pbs_client3: qcom,pbs@7400 {
+			compatible = "qcom,qpnp-pbs";
+			reg = <0x7400 0x100>;
+		};
+
+		pmi632_sdam7: qcom,sdam@b600 {
+			compatible = "qcom,spmi-sdam";
+			reg = <0xb600 0x100>;
+		};
 	};
 
 	pmi632_3: qcom,pmi632@3 {
@@ -537,7 +553,7 @@
 			compatible = "qcom,qpnp-vibrator-ldo";
 			reg = <0x5700 0x100>;
 			qcom,vib-ldo-volt-uv = <3000000>;
-			qcom,vib-overdrive-volt-uv = <3544000>;
+			qcom,disable-overdrive;
 		};
 
 		pmi632_pwm: qcom,pwms@b300 {
@@ -545,6 +561,36 @@
 			reg = <0xb300 0x500>;
 			reg-names = "lpg-base";
 			#pwm-cells = <2>;
+			nvmem-names = "ppg_sdam";
+			nvmem = <&pmi632_sdam7>;
+			qcom,pbs-client = <&pmi632_pbs_client3>;
+			qcom,lut-sdam-base = <0x80>;
+			qcom,lut-patterns = <0 0 0 14 28 42 56 70 84 100
+						100 84 70 56 42 28 14 0 0 0>;
+			lpg@1 {
+				qcom,lpg-chan-id = <1>;
+				qcom,ramp-step-ms = <200>;
+				qcom,ramp-low-index = <0>;
+				qcom,ramp-high-index = <19>;
+				qcom,ramp-pattern-repeat;
+				qcom,lpg-sdam-base = <0x48>;
+			};
+			lpg@2 {
+				qcom,lpg-chan-id = <2>;
+				qcom,ramp-step-ms = <200>;
+				qcom,ramp-low-index = <0>;
+				qcom,ramp-high-index = <19>;
+				qcom,ramp-pattern-repeat;
+				qcom,lpg-sdam-base = <0x56>;
+			};
+			lpg@3 {
+				qcom,lpg-chan-id = <3>;
+				qcom,ramp-step-ms = <200>;
+				qcom,ramp-low-index = <0>;
+				qcom,ramp-high-index = <19>;
+				qcom,ramp-pattern-repeat;
+				qcom,lpg-sdam-base = <0x64>;
+			};
 		};
 
 		pmi632_rgb: qcom,leds@d000 {
@@ -579,6 +625,7 @@
 			interrupt-names = "sc-irq";
 
 			qcom,pmic-revid = <&pmi632_revid>;
+			qcom,voltage-step-ramp;
 
 			lcdb_ldo_vreg: ldo {
 				label = "ldo";
@@ -592,6 +639,13 @@
 				regulator-name = "lcdb_ncp";
 				regulator-min-microvolt = <4000000>;
 				regulator-max-microvolt = <6000000>;
+			};
+
+			lcdb_bst_vreg: bst {
+				label = "bst";
+				regulator-name = "lcdb_bst";
+				regulator-min-microvolt = <4700000>;
+				regulator-max-microvolt = <6275000>;
 			};
 		};
 

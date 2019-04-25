@@ -120,7 +120,7 @@ static struct msm_vidc_common_data sdm845_common_data[] = {
 	},
 	{
 		.key = "qcom,max-secure-instances",
-		.value = 5,
+		.value = 2,
 	},
 	{
 		.key = "qcom,max-hw-load",
@@ -183,7 +183,7 @@ static struct msm_vidc_common_data sdm670_common_data_v0[] = {
 	},
 	{
 		.key = "qcom,max-hw-load",
-		.value = 2219400,
+		.value = 2241480,
 	},
 	{
 		.key = "qcom,max-hq-mbs-per-frame",

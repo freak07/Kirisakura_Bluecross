@@ -752,11 +752,7 @@ static void cpu_pm_pmu_setup(struct arm_pmu *armpmu, unsigned long cmd)
 		if (!event)
 			continue;
 
-		/*
-		 * Check if an attempt was made to free this event during
-		 * the CPU went offline.
-		 */
-		if (event->state == PERF_EVENT_STATE_ZOMBIE)
+		if (event->state != PERF_EVENT_STATE_ACTIVE)
 			continue;
 
 		switch (cmd) {
@@ -882,10 +878,8 @@ static int arm_perf_starting_cpu(unsigned int cpu, struct hlist_node *node)
 	if (!pmu || !cpumask_test_cpu(cpu, &pmu->supported_cpus))
 		return 0;
 
-	data.cmd    = CPU_PM_EXIT;
-	cpu_pm_pmu_common(&data);
-	if (data.ret == NOTIFY_DONE)
-		return 0;
+	if (pmu->reset)
+		pmu->reset(pmu);
 
 	if (data.armpmu->pmu_state != ARM_PMU_STATE_OFF &&
 		data.armpmu->plat_device) {
@@ -911,8 +905,6 @@ static int arm_perf_stopping_cpu(unsigned int cpu, struct hlist_node *node)
 	if (!pmu || !cpumask_test_cpu(cpu, &pmu->supported_cpus))
 		return 0;
 
-	data.cmd = CPU_PM_ENTER;
-	cpu_pm_pmu_common(&data);
 	/* Disarm the PMU IRQ before disappearing. */
 	if (data.armpmu->pmu_state == ARM_PMU_STATE_RUNNING &&
 		data.armpmu->plat_device) {
@@ -1128,6 +1120,7 @@ int arm_pmu_device_probe(struct platform_device *pdev,
 	armpmu_init(pmu);
 
 	pmu->plat_device = pdev;
+	platform_set_drvdata(pdev, pmu);
 
 	if (node && (of_id = of_match_node(of_table, pdev->dev.of_node))) {
 		init_fn = of_id->data;

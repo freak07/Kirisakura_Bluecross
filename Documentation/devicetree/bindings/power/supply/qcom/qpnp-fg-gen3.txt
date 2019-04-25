@@ -179,6 +179,14 @@ First Level Node - FG Gen3 device
 		    Element 0 - Retry value for timer
 		    Element 1 - Maximum value for timer
 
+- qcom,fg-esr-timer-shutdown
+	Usage:      optional
+	Value type: <prop-encoded-array>
+	Definition: Number of cycles between ESR pulses at/after shutdwon.This is
+		    defined when TWM (traditional watch mode) is supported.
+		    Element 0 - Retry value for timer
+		    Element 1 - Maximum value for timer
+
 - qcom,fg-esr-pulse-thresh-ma
 	Usage:      optional
 	Value type: <u32>
@@ -296,6 +304,17 @@ First Level Node - FG Gen3 device
 		    This should be defined in the ascending order and in the
 		    range of 0-100. Array limit is set to 3.
 
+- qcom,ki-coeff-low-dischg
+	Usage:      optional
+	Value type: <prop-encoded-array>
+	Definition: Array of ki coefficient values for low discharge current
+		    during discharge. These values will be applied when the
+		    monotonic SOC goes below the SOC threshold specified under
+		    qcom,ki-coeff-soc-dischg. Array limit is set to 3. This
+		    property should be specified if qcom,ki-coeff-soc-dischg
+		    is specified to make it fully functional. Value has no
+		    unit. Allowed range is 0 to 62200 in micro units.
+
 - qcom,ki-coeff-med-dischg
 	Usage:      optional
 	Value type: <prop-encoded-array>
@@ -324,13 +343,6 @@ First Level Node - FG Gen3 device
 	Definition: Ki coefficient full SOC value that will be applied during
 		    discharging. If not specified, a value of 0 will be set.
 		    Allowed range is from 245 to 62256.
-
-- qcom,ki-coeff-low-dischg
-	Usage:      optional
-	Value type: <u32>
-	Definition: Ki coefficient value for low discharge current during
-		    discharging. Value has no unit. Allowed range is 0-62200
-		    in micro units.
 
 - qcom,ki-coeff-hi-chg
 	Usage:      optional
@@ -453,6 +465,28 @@ First Level Node - FG Gen3 device
 	Usage:      optional
 	Value type: <u32>
 	Definition: The delay in ms for FG to enable BMD after reading RID.
+
+- qcom,fg-use-sw-esr
+	Usage:      optional
+	Value type: <empty>
+	Definition: A boolean property when defined uses software based
+		    ESR during charging.
+
+- qcom,fg-disable-esr-pull-dn
+	Usage:      optional
+	Value type: <empty>
+	Definition: A boolean property which disables ESR pull-down.
+		    This is to be used for debug purposes only.
+
+- qcom,fg-sync-sleep-threshold-ma
+	Usage:      optional
+	Value type: <u32>
+	Definition: The minimum battery current for FG to enter into sync-sleep.
+
+- qcom,fg-disable-in-twm
+	Usage:      optional
+	Value type: <empty>
+	Definition: A boolean property which disables FG during TWM entry.
 
 ==========================================================
 Second Level Nodes - Peripherals managed by FG Gen3 driver

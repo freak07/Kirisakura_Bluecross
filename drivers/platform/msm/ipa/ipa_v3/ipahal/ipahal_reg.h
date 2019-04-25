@@ -135,11 +135,10 @@ enum ipahal_reg_name {
 	IPA_MBIM_DEAGGR_FEC_ATTR_EE_n,
 	IPA_GEN_DEAGGR_FEC_ATTR_EE_n,
 	IPA_GSI_CONF,
-	IPA_ENDP_GSI_CFG1_OFST_n,
-	IPA_ENDP_GSI_CFG2_OFST_n,
-	IPA_ENDP_GSI_CFG_AOS_OFST_n,
-	IPA_ENDP_GSI_CFG_TLV_OFST_n,
-	IPA_SPARE_REG_1_OFST,
+	IPA_ENDP_GSI_CFG1_n,
+	IPA_ENDP_GSI_CFG2_n,
+	IPA_ENDP_GSI_CFG_AOS_n,
+	IPA_ENDP_GSI_CFG_TLV_n,
 	IPA_REG_MAX,
 };
 
@@ -525,7 +524,7 @@ struct ipahal_ep_cfg_ctrl_scnd {
 };
 
 
-int ipahal_print_all_regs(void);
+void ipahal_print_all_regs(bool print_to_dmesg);
 
 /*
  * ipahal_reg_name_str() - returns string that represent the register

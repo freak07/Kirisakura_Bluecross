@@ -123,6 +123,7 @@
 
 #define	FLASH_LED_REG_MULTI_STROBE_CTRL(base)	(base + 0x71)
 #define	LED3_FLASH_ONCE_ONLY_BIT		BIT(1)
+#define LED1N2_FLASH_ONCE_ONLY_BIT		BIT(0)
 
 #define	FLASH_LED_REG_LPG_INPUT_CTRL(base)	(base + 0x72)
 #define	LPG_INPUT_SEL_BIT			BIT(0)
@@ -425,7 +426,7 @@ led_brightness qpnp_flash_led_brightness_get(struct led_classdev *led_cdev)
 static int qpnp_flash_led_init_settings(struct qpnp_flash_led *led)
 {
 	int rc, i, addr_offset;
-	u8 val = 0, mask;
+	u8 val = 0, mask, strobe_mask = 0, strobe_ctrl;
 
 	for (i = 0; i < led->num_fnodes; i++) {
 		addr_offset = led->fnode[i].id;
@@ -436,6 +437,57 @@ static int qpnp_flash_led_init_settings(struct qpnp_flash_led *led)
 			return rc;
 
 		val |= 0x1 << led->fnode[i].id;
+
+		rc = qpnp_flash_led_write(led,
+			FLASH_LED_REG_SAFETY_TMR(led->base + addr_offset),
+			FLASH_LED_SAFETY_TMR_DISABLED);
+		if (rc < 0)
+			return rc;
+
+		if (led->fnode[i].strobe_sel == HW_STROBE) {
+			if (led->fnode[i].id == LED3)
+				strobe_mask |= LED3_FLASH_ONCE_ONLY_BIT;
+			else
+				strobe_mask |= LED1N2_FLASH_ONCE_ONLY_BIT;
+		}
+
+		if (led->fnode[i].id == LED3 &&
+				led->fnode[i].strobe_sel == LPG_STROBE)
+			strobe_mask |= LED3_FLASH_ONCE_ONLY_BIT;
+		/*
+		 * As per the hardware recommendation, to use LED2/LED3 in HW
+		 * strobe mode, LED1 should be set to HW strobe mode as well.
+		 */
+		if (led->fnode[i].strobe_sel == HW_STROBE &&
+		      (led->fnode[i].id == LED2 || led->fnode[i].id == LED3)) {
+			mask = FLASH_HW_STROBE_MASK;
+			addr_offset = led->fnode[LED1].id;
+			/*
+			 * HW_STROBE: enable, TRIGGER: level,
+			 * POLARITY: active high
+			 */
+			strobe_ctrl = BIT(2) | BIT(0);
+			rc = qpnp_flash_led_masked_write(led,
+				FLASH_LED_REG_STROBE_CTRL(
+				led->base + addr_offset),
+				mask, strobe_ctrl);
+			if (rc < 0)
+				return rc;
+		}
+	}
+
+	rc = qpnp_flash_led_masked_write(led,
+		FLASH_LED_REG_MULTI_STROBE_CTRL(led->base),
+		strobe_mask, 0);
+	if (rc < 0)
+		return rc;
+
+	if (led->fnode[LED3].strobe_sel == LPG_STROBE) {
+		rc = qpnp_flash_led_masked_write(led,
+			FLASH_LED_REG_LPG_INPUT_CTRL(led->base),
+			LPG_INPUT_SEL_BIT, LPG_INPUT_SEL_BIT);
+		if (rc < 0)
+			return rc;
 	}
 
 	rc = qpnp_flash_led_write(led,
@@ -629,19 +681,6 @@ static int qpnp_flash_led_init_settings(struct qpnp_flash_led *led)
 			return rc;
 	}
 
-	if (led->fnode[LED3].strobe_sel == LPG_STROBE) {
-		rc = qpnp_flash_led_masked_write(led,
-			FLASH_LED_REG_MULTI_STROBE_CTRL(led->base),
-			LED3_FLASH_ONCE_ONLY_BIT, 0);
-		if (rc < 0)
-			return rc;
-
-		rc = qpnp_flash_led_masked_write(led,
-			FLASH_LED_REG_LPG_INPUT_CTRL(led->base),
-			LPG_INPUT_SEL_BIT, LPG_INPUT_SEL_BIT);
-		if (rc < 0)
-			return rc;
-	}
 	return 0;
 }
 
@@ -712,8 +751,11 @@ static int get_property_from_fg(struct qpnp_flash_led *led,
 	union power_supply_propval pval = {0, };
 
 	if (!led->bms_psy) {
-		pr_err("no bms psy found\n");
-		return -EINVAL;
+		led->bms_psy = power_supply_get_by_name("bms");
+		if (!led->bms_psy) {
+			pr_err_ratelimited("Couldn't get bms_psy\n");
+			return -ENODEV;
+		}
 	}
 
 	rc = power_supply_get_property(led->bms_psy, prop, &pval);
@@ -1288,6 +1330,12 @@ static int qpnp_flash_led_switch_disable(struct flash_switch_data *snode)
 		if (rc < 0)
 			return rc;
 
+		rc = qpnp_flash_led_write(led,
+			FLASH_LED_REG_SAFETY_TMR(led->base + addr_offset),
+			FLASH_LED_SAFETY_TMR_DISABLED);
+		if (rc < 0)
+			return rc;
+
 		led->fnode[i].led_on = false;
 
 		if (led->fnode[i].strobe_sel == HW_STROBE) {
@@ -1759,41 +1807,6 @@ static struct device_attribute qpnp_flash_led_attrs[] = {
 	__ATTR(max_current, 0664, qpnp_flash_led_max_current_show, NULL),
 	__ATTR(enable, 0664, NULL, qpnp_flash_led_prepare_store),
 };
-
-static int flash_led_psy_notifier_call(struct notifier_block *nb,
-		unsigned long ev, void *v)
-{
-	struct power_supply *psy = v;
-	struct qpnp_flash_led *led =
-			container_of(nb, struct qpnp_flash_led, nb);
-
-	if (ev != PSY_EVENT_PROP_CHANGED)
-		return NOTIFY_OK;
-
-	if (!strcmp(psy->desc->name, "bms")) {
-		led->bms_psy = power_supply_get_by_name("bms");
-		if (!led->bms_psy)
-			pr_err("Failed to get bms power_supply\n");
-		else
-			power_supply_unreg_notifier(&led->nb);
-	}
-
-	return NOTIFY_OK;
-}
-
-static int flash_led_psy_register_notifier(struct qpnp_flash_led *led)
-{
-	int rc;
-
-	led->nb.notifier_call = flash_led_psy_notifier_call;
-	rc = power_supply_reg_notifier(&led->nb);
-	if (rc < 0) {
-		pr_err("Couldn't register psy notifier, rc = %d\n", rc);
-		return rc;
-	}
-
-	return 0;
-}
 
 /* irq handler */
 static irqreturn_t qpnp_flash_led_irq_handler(int irq, void *_led)
@@ -2784,15 +2797,6 @@ static int qpnp_flash_led_probe(struct platform_device *pdev)
 		if (rc < 0) {
 			pr_err("Unable to request led_fault(%d) IRQ(err:%d)\n",
 				led->pdata->led_fault_irq, rc);
-			goto error_switch_register;
-		}
-	}
-
-	led->bms_psy = power_supply_get_by_name("bms");
-	if (!led->bms_psy) {
-		rc = flash_led_psy_register_notifier(led);
-		if (rc < 0) {
-			pr_err("Couldn't register psy notifier, rc = %d\n", rc);
 			goto error_switch_register;
 		}
 	}

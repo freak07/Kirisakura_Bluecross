@@ -499,10 +499,15 @@ static void ipa3_vlan_l2tp_msg_free_cb(void *buff, u32 len, u32 type)
 		return;
 	}
 
-	if (type != ADD_VLAN_IFACE &&
-	    type != DEL_VLAN_IFACE &&
-	    type != ADD_L2TP_VLAN_MAPPING &&
-		type != DEL_L2TP_VLAN_MAPPING) {
+	switch (type) {
+	case ADD_VLAN_IFACE:
+	case DEL_VLAN_IFACE:
+	case ADD_L2TP_VLAN_MAPPING:
+	case DEL_L2TP_VLAN_MAPPING:
+	case ADD_BRIDGE_VLAN_MAPPING:
+	case DEL_BRIDGE_VLAN_MAPPING:
+		break;
+	default:
 		IPAERR("Wrong type given. buff %pK type %d\n", buff, type);
 		return;
 	}
@@ -515,10 +520,17 @@ static int ipa3_send_vlan_l2tp_msg(unsigned long usr_param, uint8_t msg_type)
 	int retval;
 	struct ipa_ioc_vlan_iface_info *vlan_info;
 	struct ipa_ioc_l2tp_vlan_mapping_info *mapping_info;
+	struct ipa_ioc_bridge_vlan_mapping_info *bridge_vlan_info;
 	struct ipa_msg_meta msg_meta;
+	void *buff;
 
-	if (msg_type == ADD_VLAN_IFACE ||
-		msg_type == DEL_VLAN_IFACE) {
+	IPADBG("type %d\n", msg_type);
+
+	memset(&msg_meta, 0, sizeof(msg_meta));
+	msg_meta.msg_type = msg_type;
+
+	if ((msg_type == ADD_VLAN_IFACE) ||
+		(msg_type == DEL_VLAN_IFACE)) {
 		vlan_info = kzalloc(sizeof(struct ipa_ioc_vlan_iface_info),
 			GFP_KERNEL);
 		if (!vlan_info) {
@@ -532,18 +544,10 @@ static int ipa3_send_vlan_l2tp_msg(unsigned long usr_param, uint8_t msg_type)
 			return -EFAULT;
 		}
 
-		memset(&msg_meta, 0, sizeof(msg_meta));
-		msg_meta.msg_type = msg_type;
 		msg_meta.msg_len = sizeof(struct ipa_ioc_vlan_iface_info);
-		retval = ipa3_send_msg(&msg_meta, vlan_info,
-			ipa3_vlan_l2tp_msg_free_cb);
-		if (retval) {
-			IPAERR("ipa3_send_msg failed: %d\n", retval);
-			kfree(vlan_info);
-			return retval;
-		}
-	} else if (msg_type == ADD_L2TP_VLAN_MAPPING ||
-		msg_type == DEL_L2TP_VLAN_MAPPING) {
+		buff = vlan_info;
+	} else if ((msg_type == ADD_L2TP_VLAN_MAPPING) ||
+		(msg_type == DEL_L2TP_VLAN_MAPPING)) {
 		mapping_info = kzalloc(sizeof(struct
 			ipa_ioc_l2tp_vlan_mapping_info), GFP_KERNEL);
 		if (!mapping_info) {
@@ -558,21 +562,112 @@ static int ipa3_send_vlan_l2tp_msg(unsigned long usr_param, uint8_t msg_type)
 			return -EFAULT;
 		}
 
-		memset(&msg_meta, 0, sizeof(msg_meta));
-		msg_meta.msg_type = msg_type;
 		msg_meta.msg_len = sizeof(struct
 			ipa_ioc_l2tp_vlan_mapping_info);
-		retval = ipa3_send_msg(&msg_meta, mapping_info,
-			ipa3_vlan_l2tp_msg_free_cb);
-		if (retval) {
-			IPAERR("ipa3_send_msg failed: %d\n", retval);
-			kfree(mapping_info);
-			return retval;
+		buff = mapping_info;
+	} else if ((msg_type == ADD_BRIDGE_VLAN_MAPPING) ||
+		(msg_type == DEL_BRIDGE_VLAN_MAPPING)) {
+		bridge_vlan_info = kzalloc(
+			sizeof(struct ipa_ioc_bridge_vlan_mapping_info),
+			GFP_KERNEL);
+		if (!bridge_vlan_info) {
+			IPAERR("no memory\n");
+			return -ENOMEM;
 		}
+
+		if (copy_from_user((u8 *)bridge_vlan_info,
+			(void __user *)usr_param,
+			sizeof(struct ipa_ioc_bridge_vlan_mapping_info))) {
+			kfree(bridge_vlan_info);
+			IPAERR("copy from user failed\n");
+			return -EFAULT;
+		}
+
+		msg_meta.msg_len = sizeof(struct
+			ipa_ioc_bridge_vlan_mapping_info);
+		buff = bridge_vlan_info;
 	} else {
 		IPAERR("Unexpected event\n");
 		return -EFAULT;
 	}
+
+	retval = ipa3_send_msg(&msg_meta, buff,
+		ipa3_vlan_l2tp_msg_free_cb);
+	if (retval) {
+		IPAERR("ipa3_send_msg failed: %d, msg_type %d\n",
+			retval,
+			msg_type);
+		kfree(buff);
+		return retval;
+	}
+	IPADBG("exit\n");
+
+	return 0;
+}
+
+static void ipa3_gsb_msg_free_cb(void *buff, u32 len, u32 type)
+{
+	if (!buff) {
+		IPAERR("Null buffer\n");
+		return;
+	}
+
+	switch (type) {
+	case IPA_GSB_CONNECT:
+	case IPA_GSB_DISCONNECT:
+		break;
+	default:
+		IPAERR("Wrong type given. buff %pK type %d\n", buff, type);
+		return;
+	}
+
+	kfree(buff);
+}
+
+static int ipa3_send_gsb_msg(unsigned long usr_param, uint8_t msg_type)
+{
+	int retval;
+	struct ipa_ioc_gsb_info *gsb_info;
+	struct ipa_msg_meta msg_meta;
+	void *buff;
+
+	IPADBG("type %d\n", msg_type);
+
+	memset(&msg_meta, 0, sizeof(msg_meta));
+	msg_meta.msg_type = msg_type;
+
+	if ((msg_type == IPA_GSB_CONNECT) ||
+		(msg_type == IPA_GSB_DISCONNECT)) {
+		gsb_info = kzalloc(sizeof(struct ipa_ioc_gsb_info),
+			GFP_KERNEL);
+		if (!gsb_info) {
+			IPAERR("no memory\n");
+			return -ENOMEM;
+		}
+
+		if (copy_from_user((u8 *)gsb_info, (void __user *)usr_param,
+			sizeof(struct ipa_ioc_gsb_info))) {
+			kfree(gsb_info);
+			return -EFAULT;
+		}
+
+		msg_meta.msg_len = sizeof(struct ipa_ioc_gsb_info);
+		buff = gsb_info;
+	} else {
+		IPAERR("Unexpected event\n");
+		return -EFAULT;
+	}
+
+	retval = ipa3_send_msg(&msg_meta, buff,
+		ipa3_gsb_msg_free_cb);
+	if (retval) {
+		IPAERR("ipa3_send_msg failed: %d, msg_type %d\n",
+			retval,
+			msg_type);
+		kfree(buff);
+		return retval;
+	}
+	IPADBG("exit\n");
 
 	return 0;
 }
@@ -1726,7 +1821,18 @@ static long ipa3_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			break;
 		}
 		break;
-
+	case IPA_IOC_ADD_BRIDGE_VLAN_MAPPING:
+		if (ipa3_send_vlan_l2tp_msg(arg, ADD_BRIDGE_VLAN_MAPPING)) {
+			retval = -EFAULT;
+			break;
+		}
+		break;
+	case IPA_IOC_DEL_BRIDGE_VLAN_MAPPING:
+		if (ipa3_send_vlan_l2tp_msg(arg, DEL_BRIDGE_VLAN_MAPPING)) {
+			retval = -EFAULT;
+			break;
+		}
+		break;
 	case IPA_IOC_ADD_L2TP_VLAN_MAPPING:
 		if (ipa3_send_vlan_l2tp_msg(arg, ADD_L2TP_VLAN_MAPPING)) {
 			retval = -EFAULT;
@@ -1754,6 +1860,22 @@ static long ipa3_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	case IPA_IOC_QUERY_WLAN_CLIENT:
 		IPADBG("Got IPA_IOC_QUERY_WLAN_CLIENT\n");
 		retval = ipa3_resend_wlan_msg();
+		break;
+
+	case IPA_IOC_GSB_CONNECT:
+		IPADBG("Got IPA_IOC_GSB_CONNECT\n");
+		if (ipa3_send_gsb_msg(arg, IPA_GSB_CONNECT)) {
+			retval = -EFAULT;
+			break;
+		}
+		break;
+
+	case IPA_IOC_GSB_DISCONNECT:
+		IPADBG("Got IPA_IOC_GSB_DISCONNECT\n");
+		if (ipa3_send_gsb_msg(arg, IPA_GSB_DISCONNECT)) {
+			retval = -EFAULT;
+			break;
+		}
 		break;
 
 	default:
@@ -2433,9 +2555,12 @@ static int ipa3_q6_set_ex_path_to_apps(void)
 		/* disable statuses for all modem controlled prod pipes */
 		if (IPA_CLIENT_IS_Q6_PROD(client_idx) ||
 			(ipa3_ctx->ep[ep_idx].valid &&
-			ipa3_ctx->ep[ep_idx].skip_ep_cfg)) {
+			ipa3_ctx->ep[ep_idx].skip_ep_cfg) ||
+			(ipa3_ctx->ep[ep_idx].client == IPA_CLIENT_APPS_WAN_PROD
+			&& ipa3_ctx->modem_cfg_emb_pipe_flt)) {
 			ipa_assert_on(num_descs >= ipa3_ctx->ipa_num_pipes);
 
+			ipa3_ctx->ep[ep_idx].status.status_en = false;
 			reg_write.skip_pipeline_clear = false;
 			reg_write.pipeline_clear_options =
 				IPAHAL_HPS_CLEAR;
@@ -2494,6 +2619,9 @@ void ipa3_q6_pre_shutdown_cleanup(void)
 
 	ipa3_q6_pipe_delay(true);
 	ipa3_q6_avoid_holb();
+	if (ipa3_ctx->ipa_config_is_mhi)
+		ipa3_set_reset_client_cons_pipe_sus_holb(true,
+		IPA_CLIENT_MHI_CONS);
 	if (ipa3_q6_clean_q6_tables()) {
 		IPAERR("Failed to clean Q6 tables\n");
 		BUG();
@@ -2506,6 +2634,11 @@ void ipa3_q6_pre_shutdown_cleanup(void)
 	 * on pipe reset procedure
 	 */
 	ipa3_q6_pipe_delay(false);
+	ipa3_set_reset_client_prod_pipe_delay(true,
+		IPA_CLIENT_USB_PROD);
+	if (ipa3_ctx->ipa_config_is_mhi)
+		ipa3_set_reset_client_prod_pipe_delay(true,
+		IPA_CLIENT_MHI_PROD);
 
 	IPA_ACTIVE_CLIENTS_DEC_SIMPLE();
 	IPADBG_LOW("Exit with success\n");
@@ -4238,7 +4371,7 @@ static int ipa3_panic_notifier(struct notifier_block *this,
 		IPAERR("uC panic handler failed %d\n", res);
 
 	if (atomic_read(&ipa3_ctx->ipa3_active_clients.cnt) != 0)
-		ipahal_print_all_regs();
+		ipahal_print_all_regs(false);
 
 	return NOTIFY_DONE;
 }
@@ -4974,7 +5107,7 @@ static int ipa3_pre_init(const struct ipa3_plat_drv_res *resource_p,
 
 	ipa3_ctx->logbuf = ipc_log_context_create(IPA_IPC_LOG_PAGES, "ipa", 0);
 	if (ipa3_ctx->logbuf == NULL)
-		IPAERR("failed to create IPC log, continue...\n");
+		IPADBG("failed to create IPC log, continue...\n");
 
 	/* ipa3_ctx->pdev and ipa3_ctx->uc_pdev will be set in the smmu probes*/
 	ipa3_ctx->master_pdev = ipa_pdev;
@@ -4997,6 +5130,7 @@ static int ipa3_pre_init(const struct ipa3_plat_drv_res *resource_p,
 	ipa3_ctx->apply_rg10_wa = resource_p->apply_rg10_wa;
 	ipa3_ctx->gsi_ch20_wa = resource_p->gsi_ch20_wa;
 	ipa3_ctx->use_ipa_pm = resource_p->use_ipa_pm;
+	ipa3_ctx->wdi_over_pcie = resource_p->wdi_over_pcie;
 	ipa3_ctx->ipa3_active_clients_logging.log_rdy = false;
 	ipa3_ctx->ipa_config_is_mhi = resource_p->ipa_mhi_dynamic_config;
 	ipa3_ctx->mhi_evid_limits[0] = resource_p->mhi_evid_limits[0];
@@ -5828,6 +5962,12 @@ static int get_ipa_dts_configuration(struct platform_device *pdev,
 		return result;
 	}
 
+	ipa_drv_res->wdi_over_pcie =
+		of_property_read_bool(pdev->dev.of_node,
+		"qcom,wlan-ce-db-over-pcie");
+	IPADBG("Is wdi_over_pcie ? (%s)\n",
+		ipa_drv_res->wdi_over_pcie ? "Yes":"No");
+
 	/*
 	 * If we're on emulator, get its interrupt controller's mem
 	 * start and size
@@ -6154,15 +6294,17 @@ static int ipa_smmu_ap_cb_probe(struct device *dev)
 		}
 		IPADBG("AP/USB SMMU atomic set\n");
 
-		if (iommu_domain_set_attr(cb->mapping->domain,
+		if (smmu_info.fast_map) {
+			if (iommu_domain_set_attr(cb->mapping->domain,
 				DOMAIN_ATTR_FAST,
 				&fast)) {
-			IPAERR("couldn't set fast map\n");
-			arm_iommu_release_mapping(cb->mapping);
-			cb->valid = false;
-			return -EIO;
+				IPAERR("couldn't set fast map\n");
+				arm_iommu_release_mapping(cb->mapping);
+				cb->valid = false;
+				return -EIO;
+			}
+			IPADBG("SMMU fast map set\n");
 		}
-		IPADBG("SMMU fast map set\n");
 	}
 
 	pr_info("IPA smmu_info.s1_bypass_arr[AP]=%d smmu_info.fast_map=%d\n",
@@ -6229,7 +6371,7 @@ static int ipa_smmu_ap_cb_probe(struct device *dev)
 			iova_p, &pa_p, size_p);
 		ipa3_iommu_map(cb->mapping->domain,
 			iova_p, pa_p, size_p,
-			IOMMU_READ | IOMMU_WRITE | IOMMU_MMIO);
+			IOMMU_READ | IOMMU_WRITE);
 	}
 
 

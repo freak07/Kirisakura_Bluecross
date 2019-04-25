@@ -174,8 +174,6 @@ void *wcnss_prealloc_get(size_t size)
 	}
 	spin_unlock_irqrestore(&alloc_lock, flags);
 
-	WARN(1, "wcnss_prealloc not available for size %zu\n", size);
-
 	return NULL;
 }
 EXPORT_SYMBOL(wcnss_prealloc_get);

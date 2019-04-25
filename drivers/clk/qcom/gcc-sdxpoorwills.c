@@ -143,11 +143,6 @@ static struct clk_alpha_pll gpll0 = {
 			.parent_names = (const char *[]){ "bi_tcxo" },
 			.num_parents = 1,
 			.ops = &clk_trion_fixed_pll_ops,
-			VDD_CX_FMAX_MAP4(
-				MIN, 615000000,
-				LOW, 1066000000,
-				LOW_L1, 1600000000,
-				NOMINAL, 2000000000),
 		},
 	},
 };
@@ -757,7 +752,7 @@ static struct clk_rcg2 gcc_spmi_fetcher_clk_src = {
 static const struct freq_tbl ftbl_gcc_usb30_master_clk_src[] = {
 	F(50000000, P_GPLL0_OUT_EVEN, 6, 0, 0),
 	F(75000000, P_GPLL0_OUT_EVEN, 4, 0, 0),
-	F(100000000, P_GPLL0_OUT_MAIN, 6, 0, 0),
+	F(120000000, P_GPLL0_OUT_MAIN, 5, 0, 0),
 	F(200000000, P_GPLL0_OUT_MAIN, 3, 0, 0),
 	F(240000000, P_GPLL0_OUT_MAIN, 2.5, 0, 0),
 	{ }
@@ -777,7 +772,7 @@ static struct clk_rcg2 gcc_usb30_master_clk_src = {
 		VDD_CX_FMAX_MAP5(
 			MIN, 50000000,
 			LOWER, 75000000,
-			LOW, 100000000,
+			LOW, 120000000,
 			NOMINAL, 200000000,
 			HIGH, 240000000),
 	},
@@ -1844,15 +1839,23 @@ static const struct qcom_cc_desc gcc_sdxpoorwills_desc = {
 
 static const struct of_device_id gcc_sdxpoorwills_match_table[] = {
 	{ .compatible = "qcom,gcc-sdxpoorwills" },
+	{ .compatible = "qcom,gcc-sdxpoorwills-v2" },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, gcc_sdxpoorwills_match_table);
 
+static void gcc_fixup_sdxpoorwillsv2(void)
+{
+	gcc_blsp1_ahb_clk.clkr.enable_mask = BIT(14);
+	gcc_blsp1_sleep_clk.clkr.enable_mask = BIT(15);
+}
+
 static int gcc_sdxpoorwills_probe(struct platform_device *pdev)
 {
-	int i, ret = 0;
+	int i, ret = 0, compatlen;
 	struct clk *clk;
 	struct regmap *regmap;
+	const char *compat = NULL;
 
 	regmap = qcom_cc_map(pdev, &gcc_sdxpoorwills_desc);
 	if (IS_ERR(regmap))
@@ -1873,6 +1876,13 @@ static int gcc_sdxpoorwills_probe(struct platform_device *pdev)
 				"Unable to get vdd_cx_ao regulator\n");
 		return PTR_ERR(vdd_cx_ao.regulator[0]);
 	}
+
+	compat = of_get_property(pdev->dev.of_node, "compatible", &compatlen);
+	if (!compat || (compatlen <= 0))
+		return -EINVAL;
+
+	if (!strcmp(compat, "qcom,gcc-sdxpoorwills-v2"))
+		gcc_fixup_sdxpoorwillsv2();
 
 	/* Register the dummy measurement clocks */
 	for (i = 0; i < ARRAY_SIZE(gcc_sdxpoorwills_hws); i++) {

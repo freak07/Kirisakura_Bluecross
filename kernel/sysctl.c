@@ -105,7 +105,6 @@ extern char core_pattern[];
 extern unsigned int core_pipe_limit;
 #endif
 extern int pid_max;
-extern int extra_free_kbytes;
 extern int pid_max_min, pid_max_max;
 extern int percpu_pagelist_fraction;
 extern int latencytop_enabled;
@@ -128,8 +127,9 @@ static int __maybe_unused three = 3;
 static int __maybe_unused four = 4;
 static unsigned long one_ul = 1;
 static int one_hundred = 100;
-#ifdef CONFIG_PERF_EVENTS
-static int one_thousand = 1000;
+static int __maybe_unused one_thousand = 1000;
+#ifdef CONFIG_SCHED_WALT
+static int two_million = 2000000;
 #endif
 #ifdef CONFIG_PRINTK
 static int ten_thousand = 10000;
@@ -358,6 +358,24 @@ static struct ctl_table kern_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
+	{
+		.procname	= "sched_min_task_util_for_boost_colocation",
+		.data		= &sysctl_sched_min_task_util_for_boost_colocation,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &zero,
+		.extra2		= &one_thousand,
+	},
+	{
+		.procname	= "sched_little_cluster_coloc_fmin_khz",
+		.data		= &sysctl_sched_little_cluster_coloc_fmin_khz,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= sched_little_cluster_coloc_fmin_khz_handler,
+		.extra1		= &zero,
+		.extra2		= &two_million,
+	},
 #endif
 	{
 		.procname	= "sched_upmigrate",
@@ -399,22 +417,6 @@ static struct ctl_table kern_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
-#ifdef CONFIG_SCHED_WALT
-	{
-		.procname	= "sched_use_walt_cpu_util",
-		.data		= &sysctl_sched_use_walt_cpu_util,
-		.maxlen		= sizeof(unsigned int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
-	{
-		.procname	= "sched_use_walt_task_util",
-		.data		= &sysctl_sched_use_walt_task_util,
-		.maxlen		= sizeof(unsigned int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
-#endif
 	{
 		.procname	= "sched_cstate_aware",
 		.data		= &sysctl_sched_cstate_aware,
@@ -1411,6 +1413,13 @@ static struct ctl_table vm_table[] = {
 		.proc_handler	= proc_dointvec,
 	},
 	{
+		.procname       = "reap_mem_on_sigkill",
+		.data           = &sysctl_reap_mem_on_sigkill,
+		.maxlen         = sizeof(sysctl_reap_mem_on_sigkill),
+		.mode           = 0644,
+		.proc_handler   = proc_dointvec,
+	},
+	{
 		.procname	= "overcommit_ratio",
 		.data		= &sysctl_overcommit_ratio,
 		.maxlen		= sizeof(sysctl_overcommit_ratio),
@@ -1502,6 +1511,15 @@ static struct ctl_table vm_table[] = {
 		.proc_handler	= proc_dointvec_minmax,
 		.extra1		= &zero,
 		.extra2		= &one_hundred,
+	},
+	{
+		.procname       = "want_old_faultaround_pte",
+		.data           = &want_old_faultaround_pte,
+		.maxlen         = sizeof(want_old_faultaround_pte),
+		.mode           = 0644,
+		.proc_handler   = proc_dointvec_minmax,
+		.extra1         = &zero,
+		.extra2         = &one,
 	},
 #ifdef CONFIG_HUGETLB_PAGE
 	{
@@ -3089,7 +3107,7 @@ static int do_proc_douintvec_capacity_conv(bool *negp, unsigned long *lvalp,
 					   int *valp, int write, void *data)
 {
 	if (write) {
-		if (*negp)
+		if (*negp || *lvalp == 0)
 			return -EINVAL;
 		*valp = SCHED_FIXEDPOINT_SCALE * 100 / *lvalp;
 	} else {

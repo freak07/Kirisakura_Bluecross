@@ -20,6 +20,8 @@
 /* packet opcode types */
 #define CAM_ICP_OPCODE_IPE_UPDATE 0
 #define CAM_ICP_OPCODE_BPS_UPDATE 1
+#define CAM_ICP_OPCODE_IPE_SETTINGS 2
+#define CAM_ICP_OPCODE_BPS_SETTINGS 3
 
 /* IPE input port resource type */
 #define CAM_ICP_IPE_INPUT_IMAGE_FULL            0x0
@@ -59,8 +61,11 @@
 /* Command meta types */
 #define CAM_ICP_CMD_META_GENERIC_BLOB           0x1
 
-/* Generic blon types */
+/* Generic blob types */
 #define CAM_ICP_CMD_GENERIC_BLOB_CLK            0x1
+#define CAM_ICP_CMD_GENERIC_BLOB_CFG_IO         0x2
+#define CAM_ICP_CMD_GENERIC_BLOB_FW_MEM_MAP     0x3
+#define CAM_ICP_CMD_GENERIC_BLOB_FW_MEM_UNMAP   0x4
 
 /**
  * struct cam_icp_clk_bw_request

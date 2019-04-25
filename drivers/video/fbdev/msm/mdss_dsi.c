@@ -383,6 +383,14 @@ static int mdss_dsi_panel_power_off(struct mdss_panel_data *pdata)
 		ret = 0;
 	}
 
+	if (gpio_is_valid(ctrl_pdata->vdd_ext_gpio)) {
+		ret = gpio_direction_output(
+			ctrl_pdata->vdd_ext_gpio, 0);
+		if (ret)
+			pr_err("%s: unable to set dir for vdd gpio\n",
+					__func__);
+	}
+
 	if (mdss_dsi_pinctrl_set_state(ctrl_pdata, false))
 		pr_debug("reset disable: pinctrl not enabled\n");
 
@@ -409,6 +417,15 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata)
 
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
+
+	if (gpio_is_valid(ctrl_pdata->vdd_ext_gpio)) {
+		ret = gpio_direction_output(
+				ctrl_pdata->vdd_ext_gpio, 1);
+		usleep_range(3000, 4000); /* h/w recommended delay */
+		if (ret)
+			pr_err("%s: unable to set dir for vdd gpio\n",
+					__func__);
+	}
 
 	ret = msm_mdss_enable_vreg(
 		ctrl_pdata->panel_power_data.vreg_config,
@@ -1934,6 +1951,9 @@ static void __mdss_dsi_update_video_mode_total(struct mdss_panel_data *pdata,
 		return;
 	}
 
+	if (ctrl_pdata->timing_db_mode)
+		MIPI_OUTP((ctrl_pdata->ctrl_base) + 0x1e8, 0x1);
+
 	vsync_period =
 		mdss_panel_get_vtotal(&pdata->panel_info);
 	hsync_period =
@@ -1943,23 +1963,13 @@ static void __mdss_dsi_update_video_mode_total(struct mdss_panel_data *pdata,
 	new_dsi_v_total =
 		((vsync_period - 1) << 16) | (hsync_period - 1);
 
-	MIPI_OUTP((ctrl_pdata->ctrl_base) + 0x2C,
-			(current_dsi_v_total | 0x8000000));
-	if (new_dsi_v_total & 0x8000000) {
-		MIPI_OUTP((ctrl_pdata->ctrl_base) + 0x2C,
-				new_dsi_v_total);
-	} else {
-		MIPI_OUTP((ctrl_pdata->ctrl_base) + 0x2C,
-				(new_dsi_v_total | 0x8000000));
-		MIPI_OUTP((ctrl_pdata->ctrl_base) + 0x2C,
-				(new_dsi_v_total & 0x7ffffff));
-	}
+	MIPI_OUTP((ctrl_pdata->ctrl_base) + 0x2C, new_dsi_v_total);
 
 	if (ctrl_pdata->timing_db_mode)
 		MIPI_OUTP((ctrl_pdata->ctrl_base) + 0x1e4, 0x1);
 
-	pr_debug("%s new_fps:%d vsync:%d hsync:%d frame_rate:%d\n",
-			__func__, new_fps, vsync_period, hsync_period,
+	pr_debug("%s new_fps:%d new_vtotal:0x%X cur_vtotal:0x%X frame_rate:%d\n",
+			__func__, new_fps, new_dsi_v_total, current_dsi_v_total,
 			ctrl_pdata->panel_data.panel_info.mipi.frame_rate);
 
 	ctrl_pdata->panel_data.panel_info.current_fps = new_fps;
@@ -2751,7 +2761,6 @@ static int mdss_dsi_event_handler(struct mdss_panel_data *pdata,
 		break;
 	case MDSS_EVENT_PANEL_OFF:
 		power_state = (int) (unsigned long) arg;
-		disable_esd_thread();
 		ctrl_pdata->ctrl_state &= ~CTRL_STATE_MDP_ACTIVE;
 		if (ctrl_pdata->off_cmds.link_state == DSI_LP_MODE)
 			rc = mdss_dsi_blank(pdata, power_state);
@@ -3264,6 +3273,7 @@ static int mdss_dsi_ctrl_probe(struct platform_device *pdev)
 	struct mdss_util_intf *util;
 	static int te_irq_registered;
 	struct mdss_panel_data *pdata;
+	struct mdss_panel_cfg *pan_cfg = NULL;
 
 	if (!pdev || !pdev->dev.of_node) {
 		pr_err("%s: pdev not found for DSI controller\n", __func__);
@@ -3293,6 +3303,14 @@ static int mdss_dsi_ctrl_probe(struct platform_device *pdev)
 	util = mdss_get_util_intf();
 	if (util == NULL) {
 		pr_err("Failed to get mdss utility functions\n");
+		return -ENODEV;
+	}
+
+	pan_cfg = util->panel_intf_type(MDSS_PANEL_INTF_SPI);
+	if (IS_ERR(pan_cfg)) {
+		return PTR_ERR(pan_cfg);
+	} else if (pan_cfg) {
+		pr_debug("%s: SPI is primary\n", __func__);
 		return -ENODEV;
 	}
 
@@ -4183,6 +4201,11 @@ static int mdss_dsi_parse_gpio_params(struct platform_device *ctrl_pdev,
 	ctrl_pdata->bklt_en_gpio_invert =
 			of_property_read_bool(ctrl_pdev->dev.of_node,
 				"qcom,platform-bklight-en-gpio-invert");
+
+	ctrl_pdata->vdd_ext_gpio = of_get_named_gpio(ctrl_pdev->dev.of_node,
+		"qcom,ext-vdd-gpio", 0);
+	if (!gpio_is_valid(ctrl_pdata->vdd_ext_gpio))
+		pr_info("%s: ext vdd gpio not specified\n", __func__);
 
 	ctrl_pdata->rst_gpio = of_get_named_gpio(ctrl_pdev->dev.of_node,
 			 "qcom,platform-reset-gpio", 0);

@@ -4223,7 +4223,8 @@ static inline int nf_ingress(struct sk_buff *skb, struct packet_type **pt_prev,
 int (*gsb_nw_stack_recv)(struct sk_buff *skb) __rcu __read_mostly;
 EXPORT_SYMBOL(gsb_nw_stack_recv);
 
-int (*athrs_fast_nat_recv)(struct sk_buff *skb) __rcu __read_mostly;
+int (*athrs_fast_nat_recv)(struct sk_buff *skb,
+			   struct packet_type *pt_temp) __rcu __read_mostly;
 EXPORT_SYMBOL(athrs_fast_nat_recv);
 
 int (*embms_tm_multicast_recv)(struct sk_buff *skb) __rcu __read_mostly;
@@ -4238,7 +4239,7 @@ static int __netif_receive_skb_core(struct sk_buff *skb, bool pfmemalloc)
 	int ret = NET_RX_DROP;
 	__be16 type;
 	int (*gsb_ns_recv)(struct sk_buff *skb);
-	int (*fast_recv)(struct sk_buff *skb);
+	int (*fast_recv)(struct sk_buff *skb, struct packet_type *pt_temp);
 	int (*embms_recv)(struct sk_buff *skb);
 
 	net_timestamp_check(!netdev_tstamp_prequeue, skb);
@@ -4308,7 +4309,7 @@ skip_taps:
 	}
 	fast_recv = rcu_dereference(athrs_fast_nat_recv);
 	if (fast_recv) {
-		if (fast_recv(skb)) {
+		if (fast_recv(skb, pt_prev)) {
 			ret = NET_RX_SUCCESS;
 			goto out;
 		}

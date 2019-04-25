@@ -78,7 +78,6 @@
 #include <linux/sysctl.h>
 #include <linux/kcov.h>
 #include <linux/cpufreq_times.h>
-#include <linux/scs.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -344,7 +343,6 @@ void put_task_stack(struct task_struct *tsk)
 
 void free_task(struct task_struct *tsk)
 {
-	scs_release(tsk);
 	cpufreq_task_times_exit(tsk);
 
 #ifndef CONFIG_THREAD_INFO_IN_TASK
@@ -533,7 +531,6 @@ static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
 	clear_user_return_notifier(tsk);
 	clear_tsk_need_resched(tsk);
 	set_task_stack_end_magic(tsk);
-	scs_task_init(tsk);
 
 #ifdef CONFIG_CC_STACKPROTECTOR
 	tsk->stack_canary = get_random_long();
@@ -623,7 +620,7 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
 		if (!tmp)
 			goto fail_nomem;
 		*tmp = *mpnt;
-		INIT_LIST_HEAD(&tmp->anon_vma_chain);
+		INIT_VMA(tmp);
 		retval = vma_dup_policy(mpnt, tmp);
 		if (retval)
 			goto fail_nomem_policy;
@@ -773,6 +770,9 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 	mm->mmap = NULL;
 	mm->mm_rb = RB_ROOT;
 	mm->vmacache_seqnum = 0;
+#ifdef CONFIG_SPECULATIVE_PAGE_FAULT
+	rwlock_init(&mm->mm_rb_lock);
+#endif
 	atomic_set(&mm->mm_users, 1);
 	atomic_set(&mm->mm_count, 1);
 	init_rwsem(&mm->mmap_sem);
@@ -1188,7 +1188,6 @@ static int copy_mm(unsigned long clone_flags, struct task_struct *tsk)
 
 	tsk->min_flt = tsk->maj_flt = 0;
 	tsk->nvcsw = tsk->nivcsw = 0;
-	mm_event_task_init(tsk);
 #ifdef CONFIG_DETECT_HUNG_TASK
 	tsk->last_switch_count = tsk->nvcsw + tsk->nivcsw;
 #endif
@@ -1543,6 +1542,18 @@ static __latent_entropy struct task_struct *copy_process(
 	if (!p)
 		goto fork_out;
 
+	/*
+	 * This _must_ happen before we call free_task(), i.e. before we jump
+	 * to any of the bad_fork_* labels. This is to avoid freeing
+	 * p->set_child_tid which is (ab)used as a kthread's data pointer for
+	 * kernel threads (PF_KTHREAD).
+	 */
+	p->set_child_tid = (clone_flags & CLONE_CHILD_SETTID) ? child_tidptr : NULL;
+	/*
+	 * Clear TID on mm_release()?
+	 */
+	p->clear_child_tid = (clone_flags & CLONE_CHILD_CLEARTID) ? child_tidptr : NULL;
+
 	cpufreq_task_times_init(p);
 
 	/*
@@ -1613,10 +1624,6 @@ static __latent_entropy struct task_struct *copy_process(
 #endif
 
 	p->default_timer_slack_ns = current->timer_slack_ns;
-
-#ifdef CONFIG_PSI
-	p->psi_flags = 0;
-#endif
 
 	task_io_accounting_init(&p->ioac);
 	acct_clear_integrals(p);
@@ -1711,9 +1718,6 @@ static __latent_entropy struct task_struct *copy_process(
 	retval = copy_thread_tls(clone_flags, stack_start, stack_size, p, tls);
 	if (retval)
 		goto bad_fork_cleanup_io;
-	retval = scs_prepare(p, node);
-	if (retval)
-		goto bad_fork_cleanup_thread;
 
 	if (pid != &init_struct_pid) {
 		pid = alloc_pid(p->nsproxy->pid_ns_for_children);
@@ -1953,7 +1957,7 @@ struct task_struct *fork_idle(int cpu)
 			    cpu_to_node(cpu));
 	if (!IS_ERR(task)) {
 		init_idle_pids(task->pids);
-		init_idle(task, cpu, false);
+		init_idle(task, cpu);
 	}
 
 	return task;

@@ -1971,7 +1971,7 @@ static int dwc_gadget_func_wakeup(struct usb_gadget *g, int interface_id)
 	if (dwc3_gadget_is_suspended(dwc)) {
 		pr_debug("USB bus is suspended. Scheduling wakeup and returning -EAGAIN.\n");
 		dwc3_gadget_wakeup(&dwc->gadget);
-		return -EAGAIN;
+		return -EACCES;
 	}
 
 	if (dwc->revision < DWC3_REVISION_220A) {
@@ -3357,8 +3357,11 @@ static void dwc3_gadget_wakeup_interrupt(struct dwc3 *dwc, bool remote_wakeup)
 
 		/*
 		 * In case of remote wake up dwc3_gadget_wakeup_work()
-		 * is doing pm_runtime_get_sync().
+		 * is doing pm_runtime_get_sync(). But mark last wakeup
+		 * event here to prevent runtime_suspend happening before this
+		 * wakeup event is processed.
 		 */
+		pm_runtime_mark_last_busy(dwc->dev);
 		dev_dbg(dwc->dev, "Notify OTG from %s\n", __func__);
 		dwc->b_suspend = false;
 		dwc3_notify_event(dwc,
@@ -3629,6 +3632,13 @@ static void dwc3_process_event_entry(struct dwc3 *dwc,
 	/* Endpoint IRQ, handle it and return early */
 	if (event->type.is_devspec == 0) {
 		/* depevt */
+		/* If remote-wakeup attempt by device had failed, then core
+		 * wouldn't give wakeup event after resume. Handle that
+		 * here on ep event which indicates that bus is resumed.
+		 */
+		if (dwc->b_suspend &&
+		    dwc3_get_link_state(dwc) == DWC3_LINK_STATE_U0)
+			dwc3_gadget_wakeup_interrupt(dwc, false);
 		return dwc3_endpoint_interrupt(dwc, &event->depevt);
 	}
 

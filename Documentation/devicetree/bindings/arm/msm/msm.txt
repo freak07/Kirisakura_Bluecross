@@ -68,6 +68,9 @@ SoCs:
 - MSM8917
   compatible = "qcom,msm8917"
 
+- MSM8940
+  compatible = "qcom,msm8940"
+
 - MSM8936
   compatible = "qcom,msm8936"
 
@@ -95,8 +98,17 @@ SoCs:
 - QCS605
   compatible = "qcom,qcs605"
 
+- SXR1120
+  compatible = "qcom,sxr1120"
+
 - SDA670
   compatible = "qcom,sda670"
+
+- SXR1130
+  compatible = "qcom,sxr1130"
+
+- QRD1130
+  compatible = "qcom,sxr1130-qrd"
 
 - MSM8952
   compatible = "qcom,msm8952"
@@ -133,6 +145,9 @@ SoCs:
 
 - SDA429
   compatible = "qcom,sda429"
+
+- QM215
+  compatible = "qcom, qm215"
 
 - MDM9640
   compatible = "qcom,mdm9640"
@@ -267,6 +282,8 @@ compatible = "qcom,msm8917-mtp"
 compatible = "qcom,msm8917-rumi"
 compatible = "qcom,msm8917-qrd"
 compatible = "qcom,msm8917-qrd-sku5"
+compatible = "qcom,msm8940-mtp"
+compatible = "qcom,msm8940-cdp"
 compatible = "qcom,msm8926-cdp"
 compatible = "qcom,msm8926-mtp"
 compatible = "qcom,msm8926-qrd"
@@ -313,19 +330,25 @@ compatible = "qcom,sdm845-mtp"
 compatible = "qcom,sdm845-mtp"
 compatible = "qcom,sdm845-qrd"
 compatible = "qcom,sdm845-qvr"
+compatible = "qcom,sdm845-vm"
 compatible = "qcom,sda845-cdp"
 compatible = "qcom,sda845-mtp"
 compatible = "qcom,sda845-qrd"
 compatible = "qcom,sda845-hdk"
 compatible = "qcom,sda845-svr"
+compatible = "qcom,sxr1130-cdp"
+compatible = "qcom,sxr1130-mtp"
 compatible = "qcom,sdm670-rumi"
 compatible = "qcom,sdm670-cdp"
 compatible = "qcom,sdm670-mtp"
 compatible = "qcom,sdm670-qrd"
 compatible = "qcom,qcs605-cdp"
 compatible = "qcom,qcs605-mtp"
+compatible = "qcom,sxr1120-mtp"
+compatible = "qcom,sxr1120-cdp"
 compatible = "qcom,sda670-cdp"
 compatible = "qcom,sda670-mtp"
+compatible = "qcom,sda670-hdk"
 compatible = "qcom,msm8952-rumi"
 compatible = "qcom,msm8952-sim"
 compatible = "qcom,msm8952-qrd"
@@ -350,6 +373,7 @@ compatible = "qcom,sdm439-mtp"
 compatible = "qcom,sdm439-qrd"
 compatible = "qcom,sda439-cdp"
 compatible = "qcom,sda439-mtp"
+compatible = "qcom,qm215-qrd"
 compatible = "qcom,msm8953-rumi"
 compatible = "qcom,msm8953-sim"
 compatible = "qcom,msm8953-cdp"
@@ -382,4 +406,5 @@ compatible = "qcom,sdxpoorwills-rumi"
 compatible = "qcom,sdxpoorwills-atp"
 compatible = "qcom,sdxpoorwills-mtp"
 compatible = "qcom,sdxpoorwills-cdp"
+compatible = "qcom,sdxpoorwills-ttp"
 compatible = "qcom,mdm9607-ttp"

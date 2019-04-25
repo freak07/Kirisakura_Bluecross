@@ -823,7 +823,7 @@ static struct msm_vidc_ctrl msm_venc_ctrls[] = {
 		.name = "Extradata Type",
 		.type = V4L2_CTRL_TYPE_MENU,
 		.minimum = V4L2_MPEG_VIDC_EXTRADATA_NONE,
-		.maximum = V4L2_MPEG_VIDC_EXTRADATA_PQ_INFO,
+		.maximum = V4L2_MPEG_VIDC_EXTRADATA_ENC_FRAME_QP,
 		.default_value = V4L2_MPEG_VIDC_EXTRADATA_NONE,
 		.menu_skip_mask = ~(
 			(1 << V4L2_MPEG_VIDC_EXTRADATA_NONE) |
@@ -846,7 +846,8 @@ static struct msm_vidc_ctrl msm_venc_ctrls[] = {
 			(1 << V4L2_MPEG_VIDC_EXTRADATA_METADATA_MBI) |
 			(1 << V4L2_MPEG_VIDC_EXTRADATA_YUV_STATS)|
 			(1 << V4L2_MPEG_VIDC_EXTRADATA_ROI_QP) |
-			(1 << V4L2_MPEG_VIDC_EXTRADATA_PQ_INFO)
+			(1 << V4L2_MPEG_VIDC_EXTRADATA_PQ_INFO) |
+			(1ULL << V4L2_MPEG_VIDC_EXTRADATA_ENC_FRAME_QP)
 			),
 		.qmenu = mpeg_video_vidc_extradata,
 	},
@@ -1564,6 +1565,7 @@ static void msm_venc_update_plane_count(struct msm_vidc_inst *inst, int type)
 		case V4L2_MPEG_VIDC_EXTRADATA_NUM_CONCEALED_MB:
 		case V4L2_MPEG_VIDC_EXTRADATA_METADATA_FILLER:
 		case V4L2_MPEG_VIDC_EXTRADATA_LTR:
+		case V4L2_MPEG_VIDC_EXTRADATA_ENC_FRAME_QP:
 		case V4L2_MPEG_VIDC_EXTRADATA_METADATA_MBI:
 			inst->fmts[CAPTURE_PORT].num_planes = 2;
 		default:
@@ -3623,8 +3625,33 @@ static int try_set_ctrl(struct msm_vidc_inst *inst, struct v4l2_ctrl *ctrl)
 		 */
 		enable.enable = !(ctrl->val);
 		pdata = &enable;
+		switch (ctrl->val) {
+		case V4L2_MPEG_VIDC_VIDEO_PRIORITY_REALTIME_DISABLE:
+			inst->flags &= ~VIDC_REALTIME;
+			break;
+		case V4L2_MPEG_VIDC_VIDEO_PRIORITY_REALTIME_ENABLE:
+			inst->flags |= VIDC_REALTIME;
+			break;
+		default:
+			dprintk(VIDC_WARN,
+				"inst(%pK) invalid priority ctrl value %#x\n",
+				inst, ctrl->val);
+			break;
+		}
 		break;
 	case V4L2_CID_MPEG_VIDC_VIDEO_OPERATING_RATE:
+		if ((ctrl->val >> 16) < inst->capability.frame_rate.min ||
+			 (ctrl->val >> 16) > inst->capability.frame_rate.max) {
+			dprintk(VIDC_ERR, "Invalid operating rate %u\n",
+				(ctrl->val >> 16));
+			rc = -ENOTSUPP;
+		} else {
+			dprintk(VIDC_DBG,
+				"inst(%pK) operating rate changed from %d to %d\n",
+				inst, inst->prop.operating_rate >> 16,
+					ctrl->val >> 16);
+			inst->prop.operating_rate = ctrl->val;
+		}
 		break;
 	case V4L2_CID_MPEG_VIDC_VIDEO_VENC_BITRATE_TYPE:
 	{
@@ -4065,6 +4092,7 @@ int msm_venc_inst_init(struct msm_vidc_inst *inst)
 	inst->buffer_mode_set[OUTPUT_PORT] = HAL_BUFFER_MODE_STATIC;
 	inst->buffer_mode_set[CAPTURE_PORT] = HAL_BUFFER_MODE_STATIC;
 	inst->prop.fps = DEFAULT_FPS;
+	inst->prop.operating_rate = 0;
 	inst->capability.pixelprocess_capabilities = 0;
 	memcpy(&inst->fmts[CAPTURE_PORT], &venc_formats[4],
 						sizeof(struct msm_vidc_format));

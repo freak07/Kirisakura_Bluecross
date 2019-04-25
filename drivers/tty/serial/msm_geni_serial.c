@@ -464,7 +464,7 @@ static struct msm_geni_serial_port *get_port_from_line(int line,
 
 	if (is_console) {
 		if ((line < 0) || (line >= GENI_UART_CONS_PORTS))
-			port = ERR_PTR(-ENXIO);
+			return ERR_PTR(-ENXIO);
 		port = &msm_geni_console_port[line];
 	} else {
 		if ((line < 0) || (line >= GENI_UART_NR_PORTS))
@@ -984,7 +984,8 @@ static void stop_tx_sequencer(struct uart_port *uport)
 		geni_write_reg_nolog(M_CMD_ABORT_EN, uport->membase,
 							SE_GENI_M_IRQ_CLEAR);
 	}
-	geni_write_reg_nolog(M_CMD_CANCEL_EN, uport, SE_GENI_M_IRQ_CLEAR);
+	geni_write_reg_nolog(M_CMD_CANCEL_EN, uport->membase,
+						SE_GENI_M_IRQ_CLEAR);
 	/*
 	 * If we end up having to cancel an on-going Tx for non-console usecase
 	 * then it means there was some unsent data in the Tx FIFO, consequently
@@ -2462,11 +2463,21 @@ static int msm_geni_serial_probe(struct platform_device *pdev)
 	}
 	dev_port->serial_rsc.geni_gpio_active =
 		pinctrl_lookup_state(dev_port->serial_rsc.geni_pinctrl,
-							PINCTRL_DEFAULT);
+							PINCTRL_ACTIVE);
+
 	if (IS_ERR_OR_NULL(dev_port->serial_rsc.geni_gpio_active)) {
-		dev_err(&pdev->dev, "No default config specified!\n");
-		ret = PTR_ERR(dev_port->serial_rsc.geni_gpio_active);
-		goto exit_geni_serial_probe;
+		/*
+		 * Backward compatible : In case few chips doesn't have ACTIVE
+		 * state defined.
+		 */
+		dev_port->serial_rsc.geni_gpio_active =
+			pinctrl_lookup_state(dev_port->serial_rsc.geni_pinctrl,
+							PINCTRL_DEFAULT);
+		if (IS_ERR_OR_NULL(dev_port->serial_rsc.geni_gpio_active)) {
+			dev_err(&pdev->dev, "No default config specified!\n");
+			ret = PTR_ERR(dev_port->serial_rsc.geni_gpio_active);
+			goto exit_geni_serial_probe;
+		}
 	}
 
 	/*

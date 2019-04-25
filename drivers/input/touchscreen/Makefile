@@ -107,7 +107,9 @@ obj-$(CONFIG_TOUCHSCREEN_ROHM_BU21023)	+= rohm_bu21023.o
 # TOUCHSCREEN_FTS is overloaded: It is used for different drivers in
 # stm/Kconfig and focaltech_touch_Kconfig
 # obj-$(CONFIG_TOUCHSCREEN_FTS)		+= focaltech_touch/
+obj-$(CONFIG_TOUCHSCREEN_GT9XX_v28)		+= gt9xx_v2.8/
 obj-$(CONFIG_TOUCHSCREEN_HIMAX_CHIPSET)	+= hxchipset/
+obj-$(CONFIG_TOUCHSCREEN_EKTF3XXX_CHIPSET) += ektf3xxx/
 obj-$(CONFIG_TOUCHSCREEN_HEATMAP)	+= heatmap.o
 obj-$(CONFIG_TOUCHSCREEN_FTM4)		+= stm/
 obj-$(CONFIG_TOUCHSCREEN_SEC_TS)	+= sec_ts/

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018-2019 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -15,6 +15,8 @@
 
 &blsp1_uart2 {
 	status = "ok";
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart_console_active>;
 };
 
 &pm8953_gpios {
@@ -233,7 +235,7 @@
 
 &dsi_hx8399c_hd_vid {
 	/delete-property/ qcom,mdss-dsi-panel-timings;
-	qcom,mdss-dsi-panel-timings-phy-12nm = [08 06 0a 02 00 04 02 08];
+	qcom,mdss-dsi-panel-timings-phy-12nm = [09 06 0a 02 00 05 02 08];
 	qcom,panel-supply-entries = <&dsi_panel_pwr_supply>;
 	qcom,mdss-dsi-bl-pmic-control-type = "bl_ctrl_pwm";
 	qcom,mdss-dsi-bl-pmic-pwm-frequency = <100>;
@@ -567,4 +569,28 @@
 	qcom,mdss-dsi-bl-pmic-bank-select = <0>;
 	qcom,mdss-dsi-pwm-gpio = <&pm8953_gpios 8 0>;
 	/delete-node/ qcom,mdss-dsi-display-timings;
+};
+
+&dsi_truly_1080_vid {
+	/delete-property/ qcom,mdss-dsi-panel-timings;
+	qcom,mdss-dsi-panel-timings-phy-12nm = [17 0a 0f 06 02 08 06 0e];
+	qcom,mdss-dsi-t-clk-post = <0x02>;
+	qcom,mdss-dsi-t-clk-pre = <0x2d>;
+	qcom,mdss-dsi-bl-pmic-control-type = "bl_ctrl_pwm";
+	qcom,mdss-dsi-bl-pmic-pwm-frequency = <100>;
+	qcom,mdss-dsi-bl-pmic-bank-select = <0>;
+	qcom,mdss-dsi-pwm-gpio = <&pm8953_gpios 8 0>;
+	qcom,panel-supply-entries = <&dsi_panel_pwr_supply>;
+};
+
+&dsi_truly_1080_cmd {
+	/delete-property/ qcom,mdss-dsi-panel-timings;
+	qcom,mdss-dsi-panel-timings-phy-12nm = [17 0a 0f 06 02 08 06 0e];
+	qcom,mdss-dsi-t-clk-post = <0x02>;
+	qcom,mdss-dsi-t-clk-pre = <0x2d>;
+	qcom,mdss-dsi-bl-pmic-control-type = "bl_ctrl_pwm";
+	qcom,mdss-dsi-bl-pmic-pwm-frequency = <100>;
+	qcom,mdss-dsi-bl-pmic-bank-select = <0>;
+	qcom,mdss-dsi-pwm-gpio = <&pm8953_gpios 8 0>;
+	qcom,panel-supply-entries = <&dsi_panel_pwr_supply>;
 };

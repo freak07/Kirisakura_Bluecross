@@ -45,15 +45,6 @@
 					fsmgr_flags = "wait,avb";
 					status = "ok";
 				};
-				system {
-					compatible = "android,system";
-					dev = "/dev/block/platform/soc/7824900.sdhci/by-name/system";
-					type = "ext4";
-					mnt_flags = "ro,barrier=1,discard";
-					fsmgr_flags = "wait,avb";
-					status = "ok";
-				};
-
 			};
 		};
 	};
@@ -132,7 +123,7 @@
 		dump_mem: mem_dump_region {
 			compatible = "shared-dma-pool";
 			reusable;
-			size = <0 0x2400000>;
+			size = <0x400000>;
 		};
 	};
 
@@ -998,7 +989,7 @@
 		reg-names = "wdt-base";
 		interrupts = <0 3 0>, <0 4 0>;
 		qcom,bark-time = <11000>;
-		qcom,pet-time = <10000>;
+		qcom,pet-time = <9360>;
 		qcom,ipi-ping;
 		qcom,wakeup-enable;
 		status = "okay";
@@ -1049,9 +1040,9 @@
 			reg = <0x10 8>;
 		};
 
-		dload_type@18 {
+		dload_type@1c {
 			compatible = "qcom,msm-imem-dload-type";
-			reg = <0x18 4>;
+			reg = <0x1c 4>;
 		};
 
 		restart_reason@65c {
@@ -1466,6 +1457,7 @@
 		qcom,qsee-ce-hw-instance = <0>;
 		qcom,disk-encrypt-pipe-pair = <2>;
 		qcom,support-fde;
+		qcom,commonlib64-loaded-by-uefi;
 		qcom,msm-bus,name = "qseecom-noc";
 		qcom,msm-bus,num-cases = <4>;
 		qcom,msm-bus,num-paths = <1>;

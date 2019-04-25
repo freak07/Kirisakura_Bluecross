@@ -84,6 +84,9 @@ static int parse_dt(struct device *dev, struct synaptics_dsx_board_data *bdata)
 	bdata->wakeup_gesture_en = of_property_read_bool(np,
 			"synaptics,wakeup-gestures-en");
 
+	bdata->dont_disable_regs = of_property_read_bool(np,
+			"synaptics,do-not-disable-regulators");
+
 	retval = of_property_read_string(np, "synaptics,pwr-reg-name", &name);
 	if (retval < 0)
 		bdata->pwr_reg_name = NULL;
@@ -184,6 +187,10 @@ static int parse_dt(struct device *dev, struct synaptics_dsx_board_data *bdata)
 		bdata->max_y_for_2d = -1;
 	}
 
+	retval = of_property_read_u32(np, "synaptics,bus-lpm-cur-uA",
+			&value);
+	bdata->bus_lpm_cur_uA = retval < 0 ? 0 : value;
+
 	bdata->swap_axes = of_property_read_bool(np, "synaptics,swap-axes");
 	bdata->x_flip = of_property_read_bool(np, "synaptics,x-flip");
 	bdata->y_flip = of_property_read_bool(np, "synaptics,y-flip");
@@ -202,6 +209,12 @@ static int parse_dt(struct device *dev, struct synaptics_dsx_board_data *bdata)
 	} else {
 		bdata->ub_i2c_addr = -1;
 	}
+
+	retval = of_property_read_string(np, "synaptics,fw-name", &name);
+	if (retval < 0)
+		bdata->fw_name = NULL;
+	else
+		bdata->fw_name = name;
 
 	prop = of_find_property(np, "synaptics,cap-button-codes", NULL);
 	if (prop && prop->length) {

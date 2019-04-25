@@ -103,6 +103,7 @@ ezchip	EZchip Semiconductor
 fcs	Fairchild Semiconductor
 firefly	Firefly
 focaltech	FocalTech Systems Co.,Ltd
+fpc	Fingerprint Cards AB.
 friendlyarm	Guangzhou FriendlyARM Computer Tech Co., Ltd
 fsl	Freescale Semiconductor
 ge	General Electric Company
@@ -122,13 +123,13 @@ halo	Halo Microelectronics Co., Ltd.
 hannstar	HannStar Display Corporation
 haoyu	Haoyu Microelectronic Co. Ltd.
 hardkernel	Hardkernel Co., Ltd
-himax	Himax Technologies, Inc.
 hisilicon	Hisilicon Limited.
 hit	Hitachi Ltd.
 hitex	Hitex Development Tools
 holt	Holt Integrated Circuits, Inc.
 honeywell	Honeywell
 hp	Hewlett Packard
+himax   Himax Coroporation
 i2se	I2SE GmbH
 ibm	International Business Machines (IBM)
 idt	Integrated Device Technologies, Inc.
@@ -319,3 +320,4 @@ zarlink	Zarlink Semiconductor
 zii	Zodiac Inflight Innovations
 zte	ZTE Corp.
 zyxel	ZyXEL Communications Corp.
+inven   InvenSense, Inc.

@@ -17,6 +17,7 @@
 #include "msm_camera_i2c_mux.h"
 #include <linux/regulator/rpm-smd-regulator.h>
 #include <linux/regulator/consumer.h>
+#include <media/adsp-shmem-device.h>
 
 #undef CDBG
 #define CDBG(fmt, args...) pr_debug(fmt, ##args)
@@ -82,9 +83,13 @@ static void msm_sensor_misc_regulator(
 
 int32_t msm_sensor_free_sensor_data(struct msm_sensor_ctrl_t *s_ctrl)
 {
+	struct msm_camera_sensor_slave_info *slave_info = NULL;
+
 	if (!s_ctrl->pdev && !s_ctrl->sensor_i2c_client->client)
 		return 0;
 	kfree(s_ctrl->sensordata->slave_info);
+	slave_info = s_ctrl->sensordata->cam_slave_info;
+	kfree(slave_info->sensor_id_info.setting.reg_setting);
 	kfree(s_ctrl->sensordata->cam_slave_info);
 	kfree(s_ctrl->sensordata->actuator_info);
 	kfree(s_ctrl->sensordata->power_info.gpio_conf->gpio_num_info);
@@ -254,11 +259,33 @@ int msm_sensor_match_id(struct msm_sensor_ctrl_t *s_ctrl)
 	slave_info = s_ctrl->sensordata->slave_info;
 	sensor_name = s_ctrl->sensordata->sensor_name;
 
+	if (adsp_shmem_is_initialized()) {
+		pr_debug("%s aDSP camera supports sensor_name:%s\n", __func__,
+			adsp_shmem_get_sensor_name());
+		if (strnstr(sensor_name, adsp_shmem_get_sensor_name(),
+			strlen(sensor_name))) {
+			pr_debug("%s ARM-side sensor matched with aDSP-side sensor:%s\n",
+				__func__, sensor_name);
+			return rc;
+		}
+	}
+
 	if (!sensor_i2c_client || !slave_info || !sensor_name) {
 		pr_err("%s:%d failed: %pK %pK %pK\n",
 			__func__, __LINE__, sensor_i2c_client, slave_info,
 			sensor_name);
 		return -EINVAL;
+	}
+
+	if (slave_info->setting && slave_info->setting->size > 0) {
+		rc = s_ctrl->sensor_i2c_client->i2c_func_tbl->
+			i2c_write_table(s_ctrl->sensor_i2c_client,
+			slave_info->setting);
+		if (rc < 0)
+			pr_err("Write array failed prior to probe\n");
+
+	} else {
+		CDBG("No writes needed for this sensor before probe\n");
 	}
 
 	rc = sensor_i2c_client->i2c_func_tbl->i2c_read(
@@ -448,6 +475,11 @@ static int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 		struct msm_camera_i2c_reg_setting conf_array;
 		struct msm_camera_i2c_reg_array *reg_setting = NULL;
 
+		if (adsp_shmem_get_state() != CAMERA_STATUS_END) {
+			mutex_unlock(s_ctrl->msm_sensor_mutex);
+			return 0;
+		}
+
 		if (s_ctrl->is_csid_tg_mode)
 			goto DONE;
 
@@ -524,6 +556,11 @@ static int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 		uint16_t local_data = 0;
 		uint16_t orig_slave_addr = 0, read_slave_addr = 0;
 		uint16_t orig_addr_type = 0, read_addr_type = 0;
+
+		if (adsp_shmem_get_state() != CAMERA_STATUS_END) {
+			mutex_unlock(s_ctrl->msm_sensor_mutex);
+			return 0;
+		}
 
 		if (s_ctrl->is_csid_tg_mode)
 			goto DONE;
@@ -602,6 +639,11 @@ static int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 		struct msm_camera_i2c_reg_array *reg_setting = NULL;
 		uint16_t orig_slave_addr = 0, write_slave_addr = 0;
 		uint16_t orig_addr_type = 0, write_addr_type = 0;
+
+		if (adsp_shmem_get_state() != CAMERA_STATUS_END) {
+			mutex_unlock(s_ctrl->msm_sensor_mutex);
+			return 0;
+		}
 
 		if (s_ctrl->is_csid_tg_mode)
 			goto DONE;
@@ -708,6 +750,11 @@ static int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 		struct msm_camera_i2c_seq_reg_setting32 conf_array32;
 		struct msm_camera_i2c_seq_reg_setting conf_array;
 		struct msm_camera_i2c_seq_reg_array *reg_setting = NULL;
+
+		if (adsp_shmem_get_state() != CAMERA_STATUS_END) {
+			mutex_unlock(s_ctrl->msm_sensor_mutex);
+			return 0;
+		}
 
 		if (s_ctrl->is_csid_tg_mode)
 			goto DONE;
@@ -825,6 +872,11 @@ static int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 		struct msm_camera_i2c_reg_setting32 stop_setting32;
 		struct msm_camera_i2c_reg_setting *stop_setting =
 			&s_ctrl->stop_setting;
+
+		if (adsp_shmem_get_state() != CAMERA_STATUS_END) {
+			mutex_unlock(s_ctrl->msm_sensor_mutex);
+			return 0;
+		}
 
 		if (s_ctrl->is_csid_tg_mode)
 			goto DONE;

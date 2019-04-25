@@ -286,6 +286,7 @@ struct mmc_slot {
  * @wait		waiting for all conditions described in
  *			mmc_cmdq_ready_wait to be satisified before
  *			issuing the new request to LLD.
+ * @err_rwsem		synchronizes issue/completion/error-handler ctx
  */
 struct mmc_cmdq_context_info {
 	unsigned long	active_reqs; /* in-flight requests */
@@ -299,6 +300,7 @@ struct mmc_cmdq_context_info {
 	wait_queue_head_t	queue_empty_wq;
 	wait_queue_head_t	wait;
 	int active_small_sector_read_reqs;
+	struct rw_semaphore err_rwsem;
 };
 
 /**
@@ -350,9 +352,9 @@ enum dev_state {
  * @upthreshold: up-threshold supplied to ondemand governor
  * @downthreshold: down-threshold supplied to ondemand governor
  * @need_freq_change: flag indicating if a frequency change is required
- * @clk_scaling_in_progress: flag indicating if there's ongoing frequency change
  * @is_busy_started: flag indicating if a request is handled by the HW
  * @enable: flag indicating if the clock scaling logic is enabled for this host
+ * @is_suspended: to make devfreq request queued when mmc is suspened
  */
 struct mmc_devfeq_clk_scaling {
 	spinlock_t	lock;
@@ -377,9 +379,9 @@ struct mmc_devfeq_clk_scaling {
 	unsigned int	lower_bus_speed_mode;
 #define MMC_SCALING_LOWER_DDR52_MODE	1
 	bool		need_freq_change;
-	bool		clk_scaling_in_progress;
 	bool		is_busy_started;
 	bool		enable;
+	bool		is_suspended;
 };
 
 struct mmc_host {
@@ -582,6 +584,8 @@ struct mmc_host {
 
 	bool			err_occurred;
 	u32			err_stats[MMC_ERR_MAX];
+	ktime_t			last_failed_rq_time;
+	ktime_t			last_completed_rq_time;
 
 	struct mmc_async_req	*areq;		/* active async req */
 	struct mmc_context_info	context_info;	/* async synchronization info */
@@ -694,6 +698,7 @@ static inline void *mmc_cmdq_private(struct mmc_host *host)
 #define mmc_bus_manual_resume(host) ((host)->bus_resume_flags & \
 				MMC_BUSRESUME_MANUAL_RESUME)
 
+#ifdef CONFIG_MMC_BLOCK_DEFERRED_RESUME
 static inline void mmc_set_bus_resume_policy(struct mmc_host *host, int manual)
 {
 	if (manual)
@@ -701,6 +706,11 @@ static inline void mmc_set_bus_resume_policy(struct mmc_host *host, int manual)
 	else
 		host->bus_resume_flags &= ~MMC_BUSRESUME_MANUAL_RESUME;
 }
+#else
+static inline void mmc_set_bus_resume_policy(struct mmc_host *host, int manual)
+{
+}
+#endif
 
 extern int mmc_resume_bus(struct mmc_host *host);
 

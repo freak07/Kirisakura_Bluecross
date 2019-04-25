@@ -638,7 +638,7 @@ int snd_rawmidi_output_params(struct snd_rawmidi_substream *substream,
 {
 	char *newbuf, *oldbuf;
 	struct snd_rawmidi_runtime *runtime = substream->runtime;
-	
+
 	if (substream->append && substream->use_count > 1)
 		return -EBUSY;
 	snd_rawmidi_drain_output(substream);

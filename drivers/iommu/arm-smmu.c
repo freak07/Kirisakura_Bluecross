@@ -376,6 +376,7 @@ struct arm_smmu_cb {
 	u32				mair[2];
 	struct arm_smmu_cfg		*cfg;
 	u32				actlr;
+	bool				has_actlr;
 	u32 				attributes;
 };
 
@@ -459,7 +460,7 @@ struct arm_smmu_device {
 	struct arm_smmu_smr		*smrs;
 	struct arm_smmu_s2cr		*s2crs;
 	struct mutex			stream_map_mutex;
-
+	struct mutex			iommu_group_mutex;
 	unsigned long			va_size;
 	unsigned long			ipa_size;
 	unsigned long			pa_size;
@@ -579,7 +580,6 @@ static struct arm_smmu_option_prop arm_smmu_options[] = {
 	{ ARM_SMMU_OPT_MMU500_ERRATA1, "qcom,mmu500-errata-1" },
 	{ ARM_SMMU_OPT_STATIC_CB, "qcom,enable-static-cb"},
 	{ ARM_SMMU_OPT_HALT, "qcom,enable-smmu-halt"},
-	{ ARM_SMMU_OPT_HIBERNATION, "qcom,hibernation-support"},
 	{ 0, NULL},
 };
 
@@ -607,6 +607,7 @@ static struct iommu_gather_ops qsmmuv500_errata1_smmu_gather_ops;
 static bool arm_smmu_is_static_cb(struct arm_smmu_device *smmu);
 static bool arm_smmu_is_master_side_secure(struct arm_smmu_domain *smmu_domain);
 static bool arm_smmu_is_slave_side_secure(struct arm_smmu_domain *smmu_domain);
+static bool arm_smmu_opt_hibernation(struct arm_smmu_device *smmu);
 
 static int msm_secure_smmu_map(struct iommu_domain *domain, unsigned long iova,
 			       phys_addr_t paddr, size_t size, int prot);
@@ -635,6 +636,13 @@ static void parse_driver_options(struct arm_smmu_device *smmu)
 				arm_smmu_options[i].prop);
 		}
 	} while (arm_smmu_options[++i].opt);
+
+	if (arm_smmu_opt_hibernation(smmu) &&
+	    (smmu->options & ARM_SMMU_OPT_SKIP_INIT)) {
+		dev_info(smmu->dev,
+			 "Disabling incompatible option: skip-init\n");
+		smmu->options &= ~ARM_SMMU_OPT_SKIP_INIT;
+	}
 }
 
 static bool is_dynamic_domain(struct iommu_domain *domain)
@@ -707,7 +715,7 @@ static void arm_smmu_secure_domain_unlock(struct arm_smmu_domain *smmu_domain)
 
 static bool arm_smmu_opt_hibernation(struct arm_smmu_device *smmu)
 {
-	return smmu->options & ARM_SMMU_OPT_HIBERNATION;
+	return IS_ENABLED(CONFIG_HIBERNATION);
 }
 
 /*
@@ -1769,7 +1777,8 @@ static void arm_smmu_write_context_bank(struct arm_smmu_device *smmu, int idx)
 	}
 
 	/* ACTLR (implementation defined) */
-	writel_relaxed(cb->actlr, cb_base + ARM_SMMU_CB_ACTLR);
+	if (cb->has_actlr)
+		writel_relaxed(cb->actlr, cb_base + ARM_SMMU_CB_ACTLR);
 
 	/* SCTLR */
 	reg = SCTLR_CFCFG | SCTLR_CFIE | SCTLR_CFRE | SCTLR_AFE | SCTLR_TRE;
@@ -2299,6 +2308,7 @@ static int arm_smmu_master_alloc_smes(struct device *dev)
 	struct iommu_group *group;
 	int i, idx, ret;
 
+	mutex_lock(&smmu->iommu_group_mutex);
 	mutex_lock(&smmu->stream_map_mutex);
 	/* Figure out a viable stream map entry allocation */
 	for_each_cfg_sme(fwspec, i, idx) {
@@ -2307,12 +2317,12 @@ static int arm_smmu_master_alloc_smes(struct device *dev)
 
 		if (idx != INVALID_SMENDX) {
 			ret = -EEXIST;
-			goto out_err;
+			goto sme_err;
 		}
 
 		ret = arm_smmu_find_sme(smmu, sid, mask);
 		if (ret < 0)
-			goto out_err;
+			goto sme_err;
 
 		idx = ret;
 		if (smrs && smmu->s2crs[idx].count == 0) {
@@ -2323,13 +2333,14 @@ static int arm_smmu_master_alloc_smes(struct device *dev)
 		smmu->s2crs[idx].count++;
 		cfg->smendx[i] = (s16)idx;
 	}
+	mutex_unlock(&smmu->stream_map_mutex);
 
 	group = iommu_group_get_for_dev(dev);
 	if (!group)
 		group = ERR_PTR(-ENOMEM);
 	if (IS_ERR(group)) {
 		ret = PTR_ERR(group);
-		goto out_err;
+		goto iommu_group_err;
 	}
 	iommu_group_put(group);
 
@@ -2337,15 +2348,19 @@ static int arm_smmu_master_alloc_smes(struct device *dev)
 	for_each_cfg_sme(fwspec, i, idx)
 		smmu->s2crs[idx].group = group;
 
-	mutex_unlock(&smmu->stream_map_mutex);
+	mutex_unlock(&smmu->iommu_group_mutex);
 	return 0;
 
-out_err:
+iommu_group_err:
+	mutex_lock(&smmu->stream_map_mutex);
+
+sme_err:
 	while (i--) {
 		arm_smmu_free_sme(smmu, cfg->smendx[i]);
 		cfg->smendx[i] = INVALID_SMENDX;
 	}
 	mutex_unlock(&smmu->stream_map_mutex);
+	mutex_unlock(&smmu->iommu_group_mutex);
 	return ret;
 }
 
@@ -3768,6 +3783,7 @@ static void qsmmuv2_device_reset(struct arm_smmu_device *smmu)
 		ACTLR_QCOM_OSH << ACTLR_QCOM_OSH_SHIFT |
 		ACTLR_QCOM_NSH << ACTLR_QCOM_NSH_SHIFT;
 		cb->actlr = val;
+		cb->has_actlr = true;
 	}
 
 	/* Program implementation defined registers */
@@ -4470,6 +4486,7 @@ static int arm_smmu_device_cfg_probe(struct arm_smmu_device *smmu)
 
 	smmu->num_mapping_groups = size;
 	mutex_init(&smmu->stream_map_mutex);
+	mutex_init(&smmu->iommu_group_mutex);
 
 	if (smmu->version < ARM_SMMU_V2 || !(id & ID0_PTFS_NO_AARCH32)) {
 		smmu->features |= ARM_SMMU_FEAT_FMT_AARCH32_L;
@@ -4853,6 +4870,10 @@ static int arm_smmu_device_remove(struct platform_device *pdev)
 	arm_smmu_power_off(smmu->pwr);
 
 	arm_smmu_exit_power_resources(smmu->pwr);
+
+	spin_lock(&arm_smmu_devices_lock);
+	list_del(&smmu->list);
+	spin_unlock(&arm_smmu_devices_lock);
 
 	return 0;
 }
@@ -5519,6 +5540,7 @@ static void qsmmuv500_init_cb(struct arm_smmu_domain *smmu_domain,
 		return;
 
 	cb->actlr = iommudata->actlr;
+	cb->has_actlr = true;
 	/*
 	 * Prefetch only works properly if the start and end of all
 	 * buffers in the page table are aligned to 16 Kb.

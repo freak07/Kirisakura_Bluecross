@@ -943,6 +943,7 @@ schedtune_css_alloc(struct cgroup_subsys_state *parent_css)
 		goto out;
 
 	/* Initialize per CPUs boost group support */
+	init_sched_boost(st);
 	schedtune_boostgroup_init(st, idx);
 
 	return &st->css;

@@ -490,9 +490,15 @@ int usb_func_wakeup(struct usb_function *func)
 
 	spin_lock_irqsave(&func->config->cdev->lock, flags);
 	ret = usb_func_wakeup_int(func);
-	if (ret == -EAGAIN) {
+	if (ret == -EACCES) {
 		DBG(func->config->cdev,
 			"Function wakeup for %s could not complete due to suspend state. Delayed until after bus resume.\n",
+			func->name ? func->name : "");
+		ret = 0;
+		func->func_wakeup_pending = 1;
+	} else if (ret == -EAGAIN) {
+		DBG(func->config->cdev,
+			"Function wakeup for %s sent.\n",
 			func->name ? func->name : "");
 		ret = 0;
 	} else if (ret < 0 && ret != -ENOTSUPP) {
@@ -524,14 +530,25 @@ int usb_func_ep_queue(struct usb_function *func, struct usb_ep *ep,
 	gadget = func->config->cdev->gadget;
 	if (func->func_is_suspended && func->func_wakeup_allowed) {
 		ret = usb_gadget_func_wakeup(gadget, func->intf_id);
-		if (ret == -EAGAIN) {
+		if (ret == -EACCES) {
+			pr_debug("bus suspended func wakeup for %s delayed until bus resume.\n",
+				func->name ? func->name : "");
+			func->func_wakeup_pending = 1;
+			ret = -EAGAIN;
+		} else if (ret == -EAGAIN) {
 			pr_debug("bus suspended func wakeup for %s delayed until bus resume.\n",
 				func->name ? func->name : "");
 		} else if (ret < 0 && ret != -ENOTSUPP) {
 			pr_err("Failed to wake function %s from suspend state. ret=%d.\n",
 				func->name ? func->name : "", ret);
+		} else {
+			/*
+			 * Return -EAGAIN to queue the request from
+			 * function driver wakeup function.
+			 */
+			ret = -EAGAIN;
+			goto done;
 		}
-		goto done;
 	}
 
 	if (!func->func_is_suspended)
@@ -643,18 +660,10 @@ static int config_desc(struct usb_composite_dev *cdev, unsigned w_value)
 	w_value &= 0xff;
 
 	pos = &cdev->configs;
-	c = cdev->os_desc_config;
-	if (c)
-		goto check_config;
 
 	while ((pos = pos->next) !=  &cdev->configs) {
 		c = list_entry(pos, typeof(*c), list);
 
-		/* skip OS Descriptors config which is handled separately */
-		if (c == cdev->os_desc_config)
-			continue;
-
-check_config:
 		/* ignore configs that won't work at this speed */
 		switch (speed) {
 		case USB_SPEED_SUPER_PLUS:
@@ -1607,6 +1616,9 @@ static int count_ext_prop(struct usb_configuration *c, int interface)
 	struct usb_function *f;
 	int j;
 
+	if (interface >= c->next_interface_id)
+		return -EINVAL;
+
 	f = c->interface[interface];
 	for (j = 0; j < f->os_desc_n; ++j) {
 		struct usb_os_desc *d;
@@ -1625,6 +1637,9 @@ static int len_ext_prop(struct usb_configuration *c, int interface)
 	struct usb_function *f;
 	struct usb_os_desc *d;
 	int j, res;
+
+	if (interface >= c->next_interface_id)
+		return -EINVAL;
 
 	res = 10; /* header length */
 	f = c->interface[interface];
@@ -2021,6 +2036,8 @@ unknown:
 				if (w_length == 0x0A) {
 					count = count_ext_prop(os_desc_cfg,
 						interface);
+					if (count < 0)
+						return count;
 					put_unaligned_le16(count, buf + 8);
 					count = len_ext_prop(os_desc_cfg,
 						interface);
@@ -2030,6 +2047,8 @@ unknown:
 				} else {
 					count = count_ext_prop(os_desc_cfg,
 						interface);
+					if (count < 0)
+						return count;
 					put_unaligned_le16(count, buf + 8);
 					count = len_ext_prop(os_desc_cfg,
 						interface);
@@ -2478,21 +2497,29 @@ void composite_resume(struct usb_gadget *gadget)
 	spin_lock_irqsave(&cdev->lock, flags);
 	if (cdev->config) {
 		list_for_each_entry(f, &cdev->config->functions, list) {
-			ret = usb_func_wakeup_int(f);
-			if (ret) {
-				if (ret == -EAGAIN) {
-					ERROR(f->config->cdev,
-						"Function wakeup for %s could not complete due to suspend state.\n",
-						f->name ? f->name : "");
-					break;
-				} else if (ret != -ENOTSUPP) {
-					ERROR(f->config->cdev,
-						"Failed to wake function %s from suspend state. ret=%d. Canceling USB request.\n",
-						f->name ? f->name : "",
-						ret);
+			if (f->func_wakeup_pending) {
+				ret = usb_func_wakeup_int(f);
+				if (ret) {
+					if (ret == -EAGAIN) {
+						ERROR(f->config->cdev,
+							"Function wakeup for %s could not complete due to suspend state.\n",
+							f->name ? f->name : "");
+					} else if (ret != -ENOTSUPP) {
+						ERROR(f->config->cdev,
+							"Failed to wake function %s from suspend state. ret=%d. Canceling USB request.\n",
+							f->name ? f->name : "",
+							ret);
+					}
 				}
+				f->func_wakeup_pending = 0;
 			}
 
+			/*
+			 * Call function resume irrespective of the speed.
+			 * Individual function needs to retain the USB3 Function
+			 * suspend state through out the Device suspend entry
+			 * and exit process.
+			 */
 			if (f->resume)
 				f->resume(f);
 		}

@@ -1891,6 +1891,7 @@ retry:
 		}
 
 		if (best_cpu != -1 && placement_boost != SCHED_BOOST_ON_ALL) {
+			rcu_read_unlock();
 			return best_cpu;
 		} else if (!cpumask_empty(&backup_search_cpu)) {
 			cpumask_copy(&search_cpu, &backup_search_cpu);
@@ -1899,6 +1900,7 @@ retry:
 			placement_boost = SCHED_BOOST_NONE;
 			goto retry;
 		}
+		rcu_read_unlock();
 	}
 
 noea:

@@ -138,15 +138,13 @@
 	};
 };
 
-&soc {
-	qcom,dsi-display@17 {
-		qcom,dsi-display-active;
+&ext_dsi_bridge_display {
+	qcom,dsi-display-active;
 
-		ports {
-			port@0 {
-				endpoint {
-					remote-endpoint = <&lt9611_in>;
-				};
+	ports {
+		port@0 {
+			endpoint {
+				remote-endpoint = <&lt9611_in>;
 			};
 		};
 	};
@@ -168,6 +166,9 @@
 
 &pm660_charger {
 	qcom,battery-data = <&qcs_batterydata>;
+	qcom,thermal-mitigation = <2600000 2100000 1600000 1100000
+				600000>;
+	qcom,sw-jeita-enable;
 };
 
 &int_codec {

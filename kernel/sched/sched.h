@@ -87,6 +87,7 @@ struct sched_cluster {
 	int notifier_sent;
 	bool wake_up_idle;
 	u64 aggr_grp_load;
+	u64 coloc_boost_load;
 };
 
 extern unsigned int sched_disable_window_stats;
@@ -2328,8 +2329,13 @@ static inline u64 irq_time_read(int cpu)
 #endif /* CONFIG_IRQ_TIME_ACCOUNTING */
 
 #ifdef CONFIG_SCHED_WALT
+u64 sched_ktime_clock(void);
 void note_task_waking(struct task_struct *p, u64 wallclock);
 #else /* CONFIG_SCHED_WALT */
+static inline u64 sched_ktime_clock(void)
+{
+	return 0;
+}
 static inline void note_task_waking(struct task_struct *p, u64 wallclock) { }
 #endif /* CONFIG_SCHED_WALT */
 
@@ -2365,7 +2371,7 @@ static inline void cpufreq_update_util(struct rq *rq, unsigned int flags)
 	data = rcu_dereference_sched(*per_cpu_ptr(&cpufreq_update_util_data,
 					cpu_of(rq)));
 	if (data)
-		data->func(data, ktime_get_ns(), flags);
+		data->func(data, sched_ktime_clock(), flags);
 }
 
 static inline void cpufreq_update_this_cpu(struct rq *rq, unsigned int flags)
@@ -2506,7 +2512,11 @@ static inline void __update_min_max_capacity(void)
 	int i;
 	int max_cap = 0, min_cap = INT_MAX;
 
-	for_each_online_cpu(i) {
+	for_each_possible_cpu(i) {
+
+		if (!cpu_active(i))
+			continue;
+
 		max_cap = max(max_cap, cpu_capacity(i));
 		min_cap = min(min_cap, cpu_capacity(i));
 	}
@@ -2771,6 +2781,33 @@ static inline unsigned int power_cost(int cpu, bool max)
 }
 
 extern void walt_sched_energy_populated_callback(void);
+extern void walt_update_min_max_capacity(void);
+
+static inline enum sched_boost_policy task_boost_policy(struct task_struct *p)
+{
+	enum sched_boost_policy boost_on_big = task_sched_boost(p) ?
+				sched_boost_policy() : SCHED_BOOST_NONE;
+
+	if (boost_on_big) {
+		/*
+		 * Filter out tasks less than min task util threshold
+		 * under conservative boost.
+		 */
+		if (sysctl_sched_boost == CONSERVATIVE_BOOST &&
+				task_util(p) <=
+				sysctl_sched_min_task_util_for_boost_colocation)
+			boost_on_big = SCHED_BOOST_NONE;
+	}
+
+	return boost_on_big;
+}
+
+extern void walt_map_freq_to_load(void);
+
+static inline bool is_min_capacity_cluster(struct sched_cluster *cluster)
+{
+	return is_min_capacity_cpu(cluster_first_cpu(cluster));
+}
 
 #else	/* CONFIG_SCHED_WALT */
 
@@ -2782,7 +2819,10 @@ static inline bool task_sched_boost(struct task_struct *p)
 {
 	return true;
 }
-
+static inline enum sched_boost_policy task_boost_policy(struct task_struct *p)
+{
+	return SCHED_BOOST_NONE;
+}
 static inline void check_for_migration(struct rq *rq, struct task_struct *p) { }
 
 static inline int sched_boost(void)
@@ -2904,7 +2944,9 @@ static inline unsigned int power_cost(int cpu, bool max)
 }
 
 static inline void walt_sched_energy_populated_callback(void) { }
+static inline void walt_update_min_max_capacity(void) { }
 
+static inline void walt_map_freq_to_load(void) { }
 #endif	/* CONFIG_SCHED_WALT */
 
 static inline bool energy_aware(void)

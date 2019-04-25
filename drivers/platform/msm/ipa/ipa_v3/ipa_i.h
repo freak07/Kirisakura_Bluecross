@@ -740,6 +740,8 @@ struct ipa3_status_stats {
  * @qmi_request_sent: Indicates whether QMI request to enable clear data path
  *					request is sent or not.
  * @napi_enabled: when true, IPA call client callback to start polling
+ * @client_lock_unlock: callback function to take mutex lock/unlock for USB
+ *				clients
  */
 struct ipa3_ep_context {
 	int valid;
@@ -766,11 +768,13 @@ struct ipa3_ep_context {
 	bool keep_ipa_awake;
 	struct ipa3_wlan_stats wstats;
 	u32 uc_offload_state;
-	bool disconnect_in_progress;
+	atomic_t disconnect_in_progress;
 	u32 qmi_request_sent;
 	bool napi_enabled;
 	u32 eot_in_poll_err;
 	bool ep_delay_set;
+
+	int (*client_lock_unlock)(bool is_lock);
 
 	/* sys MUST be the last element of this struct */
 	struct ipa3_sys_context *sys;
@@ -1072,6 +1076,7 @@ struct ipa3_nat_ipv6ct_common_mem {
  * @index_table_expansion_addr: index expansion table address
  * @public_ip_addr: ip address of nat table
  * @pdn_mem: pdn config table SW cache memory structure
+ * @is_tmp_mem_allocated: indicate if tmp mem has been allocated
  */
 struct ipa3_nat_mem {
 	struct ipa3_nat_ipv6ct_common_mem dev;
@@ -1079,6 +1084,7 @@ struct ipa3_nat_mem {
 	char *index_table_expansion_addr;
 	u32 public_ip_addr;
 	struct ipa_mem_buffer pdn_mem;
+	bool is_tmp_mem_allocated;
 };
 
 /**
@@ -1600,6 +1606,7 @@ struct ipa3_context {
 	struct mutex ipa_cne_evt_lock;
 	bool use_ipa_pm;
 	bool vlan_mode_iface[IPA_VLAN_IF_MAX];
+	bool wdi_over_pcie;
 };
 
 struct ipa3_plat_drv_res {
@@ -1634,6 +1641,7 @@ struct ipa3_plat_drv_res {
 	struct ipa_tz_unlock_reg_info *ipa_tz_unlock_reg;
 	bool use_ipa_pm;
 	struct ipa_pm_init_params pm_init;
+	bool wdi_over_pcie;
 };
 
 /**
@@ -1914,6 +1922,12 @@ int ipa3_xdci_connect(u32 clnt_hdl);
 int ipa3_xdci_disconnect(u32 clnt_hdl, bool should_force_clear, u32 qmi_req_id);
 
 void ipa3_xdci_ep_delay_rm(u32 clnt_hdl);
+void ipa3_register_lock_unlock_callback(int (*client_cb)(bool), u32 ipa_ep_idx);
+void ipa3_deregister_lock_unlock_callback(u32 ipa_ep_idx);
+int ipa3_set_reset_client_prod_pipe_delay(bool set_reset,
+		enum ipa_client_type client);
+int ipa3_set_reset_client_cons_pipe_sus_holb(bool set_reset,
+		enum ipa_client_type client);
 
 int ipa3_xdci_suspend(u32 ul_clnt_hdl, u32 dl_clnt_hdl,
 	bool should_force_clear, u32 qmi_req_id, bool is_dpl);
@@ -2250,6 +2264,8 @@ int ipa3_remove_interrupt_handler(enum ipa_irq_type interrupt);
  * Miscellaneous
  */
 int ipa3_get_ep_mapping(enum ipa_client_type client);
+
+enum gsi_prefetch_mode ipa_get_ep_prefetch_mode(enum ipa_client_type client);
 
 bool ipa3_is_ready(void);
 

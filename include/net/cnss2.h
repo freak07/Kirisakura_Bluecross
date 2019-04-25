@@ -115,6 +115,11 @@ struct cnss_shadow_reg_v2_cfg {
 	u32 addr;
 };
 
+struct cnss_rri_over_ddr_cfg {
+	u32 base_addr_low;
+	u32 base_addr_high;
+};
+
 struct cnss_wlan_enable_cfg {
 	u32 num_ce_tgt_cfg;
 	struct cnss_ce_tgt_pipe_cfg *ce_tgt_cfg;
@@ -124,6 +129,8 @@ struct cnss_wlan_enable_cfg {
 	struct cnss_shadow_reg_cfg *shadow_reg_cfg;
 	u32 num_shadow_reg_v2_cfg;
 	struct cnss_shadow_reg_v2_cfg *shadow_reg_v2_cfg;
+	bool rri_over_ddr_cfg_valid;
+	struct cnss_rri_over_ddr_cfg rri_over_ddr_cfg;
 };
 
 enum cnss_driver_mode {
@@ -148,17 +155,22 @@ extern int cnss_wlan_register_driver(struct cnss_wlan_driver *driver);
 extern void cnss_wlan_unregister_driver(struct cnss_wlan_driver *driver);
 extern void cnss_device_crashed(struct device *dev);
 extern int cnss_pci_link_down(struct device *dev);
+extern int cnss_pci_is_device_down(struct device *dev);
 extern void cnss_schedule_recovery(struct device *dev,
 				   enum cnss_recovery_reason reason);
 extern int cnss_self_recovery(struct device *dev,
 			      enum cnss_recovery_reason reason);
 extern int cnss_force_fw_assert(struct device *dev);
+extern int cnss_force_collect_rddm(struct device *dev);
 extern void *cnss_get_virt_ramdump_mem(struct device *dev, unsigned long *size);
 extern int cnss_get_fw_files_for_target(struct device *dev,
 					struct cnss_fw_files *pfw_files,
 					u32 target_type, u32 target_version);
 extern int cnss_get_platform_cap(struct device *dev,
 				 struct cnss_platform_cap *cap);
+extern struct dma_iommu_mapping *cnss_smmu_get_mapping(struct device *dev);
+extern int cnss_smmu_map(struct device *dev,
+			 phys_addr_t paddr, uint32_t *iova_addr, size_t size);
 extern int cnss_get_soc_info(struct device *dev, struct cnss_soc_info *info);
 extern int cnss_request_bus_bandwidth(struct device *dev, int bandwidth);
 extern int cnss_power_up(struct device *dev);
@@ -170,6 +182,9 @@ extern void cnss_release_pm_sem(struct device *dev);
 extern int cnss_wlan_pm_control(struct device *dev, bool vote);
 extern int cnss_auto_suspend(struct device *dev);
 extern int cnss_auto_resume(struct device *dev);
+extern int cnss_pci_force_wake_request(struct device *dev);
+extern int cnss_pci_is_device_awake(struct device *dev);
+extern int cnss_pci_force_wake_release(struct device *dev);
 extern int cnss_get_user_msi_assignment(struct device *dev, char *user_name,
 					int *num_vectors,
 					uint32_t *user_base_data,
@@ -182,7 +197,7 @@ extern int cnss_wlan_enable(struct device *dev,
 			    enum cnss_driver_mode mode,
 			    const char *host_version);
 extern int cnss_wlan_disable(struct device *dev, enum cnss_driver_mode mode);
-extern unsigned int cnss_get_qmi_timeout(void);
+extern unsigned int cnss_get_boot_timeout(struct device *dev);
 extern int cnss_athdiag_read(struct device *dev, uint32_t offset,
 			     uint32_t mem_type, uint32_t data_len,
 			     uint8_t *output);

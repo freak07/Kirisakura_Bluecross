@@ -30,9 +30,21 @@
 		bootargs = "core_ctl_disable_cpumask=0-7 kpti=0";
 	};
 
+	vendor: vendor {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges = <0 0 0 0xffffffff>;
+		compatible = "simple-bus";
+	};
+
 	firmware: firmware {
 		android {
 			compatible = "android,firmware";
+			vbmeta {
+				compatible = "android,vbmeta";
+				parts = "vbmeta,boot,system,vendor,dtbo,recovery";
+			};
+
 			fstab {
 				compatible = "android,fstab";
 				vendor {
@@ -40,15 +52,7 @@
 					dev = "/dev/block/platform/soc/7824900.sdhci/by-name/vendor";
 					type = "ext4";
 					mnt_flags = "ro,barrier=1,discard";
-					fsmgr_flags = "wait";
-					status = "ok";
-				};
-				system {
-					compatible = "android,system";
-					dev = "/dev/block/platform/soc/7824900.sdhci/by-name/system";
-					type = "ext4";
-					mnt_flags = "ro,barrier=1,discard";
-					fsmgr_flags = "wait";
+					fsmgr_flags = "wait,avb";
 					status = "ok";
 				};
 
@@ -97,7 +101,7 @@
 			compatible = "shared-dma-pool";
 			reusable;
 			alignment = <0 0x400000>;
-			size = <0 0x09800000>;
+			size = <0 0x0b400000>;
 		};
 
 		qseecom_mem: qseecom_region@0 {
@@ -132,6 +136,11 @@
 			label = "cont_splash_mem";
 		};
 
+		adsp_shmem_device_mem: adsp_shmem_device_region@0xc0100000 {
+			reg = <0x0 0xc0100000 0x0 0x08200000>;
+			label = "adsp_shmem_device_mem";
+		};
+
 		gpu_mem: gpu_region@0 {
 			compatible = "shared-dma-pool";
 			reusable;
@@ -143,7 +152,16 @@
 		dump_mem: mem_dump_region {
 			compatible = "shared-dma-pool";
 			reusable;
-			size = <0 0x2400000>;
+			size = <0x400000>;
+		};
+
+		/* global autoconfigured region for contiguous allocations */
+		linux,cma {
+			compatible = "shared-dma-pool";
+			reusable;
+			alignment = <0 0x400000>;
+			size = <0 0x1400000>;
+			linux,cma-default;
 		};
 	};
 
@@ -167,6 +185,7 @@
 		i2c3 = &i2c_3;
 		i2c5 = &i2c_5;
 		spi3 = &spi_3;
+		spi6 = &spi_6;
 	};
 
 	soc: soc {
@@ -419,6 +438,7 @@
 		qcom,qsee-ce-hw-instance = <0>;
 		qcom,disk-encrypt-pipe-pair = <2>;
 		qcom,support-fde;
+		qcom,commonlib64-loaded-by-uefi;
 		qcom,msm-bus,name = "qseecom-noc";
 		qcom,msm-bus,num-cases = <4>;
 		qcom,msm-bus,num-paths = <1>;
@@ -601,6 +621,42 @@
 		status = "disabled";
 	};
 
+	blsp2_uart1: uart@7af0000 {
+		compatible = "qcom,msm-hsuart-v14";
+		reg = <0x7af0000 0x200>,
+			<0x7ac4000 0x1f000>;
+		reg-names = "core_mem", "bam_mem";
+
+		interrupt-names = "core_irq", "bam_irq", "wakeup_irq";
+		#address-cells = <0>;
+		interrupt-parent = <&blsp2_uart1>;
+		interrupts = <0 1 2>;
+		#interrupt-cells = <1>;
+		interrupt-map-mask = <0xffffffff>;
+		interrupt-map = <0 &intc 0 307 0
+				1 &intc 0 239 0
+				2 &tlmm 21 0>;
+
+		qcom,inject-rx-on-wakeup;
+		qcom,rx-char-to-inject = <0xFD>;
+		qcom,master-id = <84>;
+		clock-names = "core_clk", "iface_clk";
+		clocks = <&clock_gcc clk_gcc_blsp2_uart2_apps_clk>,
+			<&clock_gcc clk_gcc_blsp2_ahb_clk>;
+		pinctrl-names = "sleep", "default";
+		pinctrl-0 = <&blsp2_uart1_sleep>;
+		pinctrl-1 = <&blsp2_uart1_active>;
+		qcom,bam-tx-ep-pipe-index = <2>;
+		qcom,bam-rx-ep-pipe-index = <3>;
+		qcom,msm-bus,name = "blsp2_uart1";
+		qcom,msm-bus,num-cases = <2>;
+		qcom,msm-bus,num-paths = <1>;
+		qcom,msm-bus,vectors-KBps =
+				<84 512 0 0>,
+				<84 512 500 800>;
+		status = "disabled";
+	};
+
 	blsp1_serial1: serial@78b0000 {
 		compatible = "qcom,msm-uartdm-v1.4", "qcom,msm-uartdm";
 		reg = <0x78b0000 0x200>;
@@ -652,6 +708,33 @@
 		qcom,master-id = <86>;
 		status = "disabled";
 	};
+
+	spi_6: spi@7af6000 { /* BLSP2 QUP2 */
+		compatible = "qcom,spi-qup-v2";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg-names = "spi_physical", "spi_bam_physical";
+		reg = <0x7af6000 0x600>,
+			<0x7ac4000 0x1f000>;
+		interrupt-names = "spi_irq", "spi_bam_irq";
+		interrupts = <0 300 0>, <0 239 0>;
+		spi-max-frequency = <19200000>;
+		pinctrl-names = "spi_default", "spi_sleep";
+		pinctrl-0 = <&spi6_default &spi6_cs0_active>;
+		pinctrl-1 = <&spi6_sleep &spi6_cs0_sleep>;
+		clocks = <&clock_gcc clk_gcc_blsp2_ahb_clk>,
+			<&clock_gcc clk_gcc_blsp2_qup2_spi_apps_clk>;
+		clock-names = "iface_clk", "core_clk";
+		qcom,infinite-mode = <0>;
+		qcom,use-bam;
+		qcom,use-pinctrl;
+		qcom,ver-reg-exists;
+		qcom,bam-consumer-pipe-index = <6>;
+		qcom,bam-producer-pipe-index = <7>;
+		qcom,master-id = <84>;
+		status = "disabled";
+	};
+
 	i2c_1: i2c@78b5000 { /* BLSP1 QUP1 */
 		compatible = "qcom,i2c-msm-v2";
 		#address-cells = <1>;
@@ -1230,7 +1313,7 @@
 		reg-names = "wdt-base";
 		interrupts = <0 3 0>, <0 4 0>;
 		qcom,bark-time = <11000>;
-		qcom,pet-time = <10000>;
+		qcom,pet-time = <9360>;
 		qcom,ipi-ping;
 		qcom,wakeup-enable;
 		qcom,scandump-size = <0x40000>;
@@ -1271,9 +1354,9 @@
 			reg = <0x10 8>;
 		};
 
-		dload_type@18 {
+		dload_type@1c {
 			compatible = "qcom,msm-imem-dload-type";
-			reg = <0x18 4>;
+			reg = <0x1c 4>;
 		};
 
 		restart_reason@65c {
@@ -1452,8 +1535,10 @@
 
 	sdhc_1: sdhci@7824900 {
 		compatible = "qcom,sdhci-msm";
-		reg = <0x7824900 0x500>, <0x7824000 0x800>, <0x7824e00 0x200>;
-		reg-names = "hc_mem", "core_mem", "cmdq_mem";
+		reg = <0x7824900 0x500>, <0x7824000 0x800>, <0x7824e00 0x200>,
+			<0x0119d000 0x4>;
+		reg-names = "hc_mem", "core_mem", "cmdq_mem",
+				"tlmm_mem";
 
 		interrupts = <0 123 0>, <0 138 0>;
 		interrupt-names = "hc_irq", "pwr_irq";

@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -34,6 +34,9 @@
 #define IPA_GENERIC_AGGR_BYTE_LIMIT 6
 #define IPA_GENERIC_AGGR_TIME_LIMIT 1
 #define IPA_GENERIC_AGGR_PKT_LIMIT 0
+
+#define IPA_GSB_AGGR_BYTE_LIMIT 14
+#define IPA_GSB_RX_BUFF_BASE_SZ 16384
 
 #define IPA_GENERIC_RX_BUFF_BASE_SZ 8192
 #define IPA_REAL_GENERIC_RX_BUFF_SZ(X) (SKB_DATA_ALIGN(\
@@ -1061,6 +1064,13 @@ int ipa3_setup_sys_pipe(struct ipa_sys_connect_params *sys_in, u32 *clnt_hdl)
 		goto fail_gen2;
 	}
 
+	result = gsi_start_channel(ep->gsi_chan_hdl);
+	if (result != GSI_STATUS_SUCCESS) {
+		IPAERR("gsi_start_channel failed res=%d ep=%d.\n", result,
+			ipa_ep_idx);
+		goto fail_gen2;
+	}
+
 	if (!ep->keep_ipa_awake)
 		IPA_ACTIVE_CLIENTS_DEC_EP(sys_in->client);
 
@@ -1657,7 +1667,7 @@ static void ipa3_cleanup_wlan_rx_common_cache(void)
 		&ipa3_ctx->wc_memb.wlan_comm_desc_list, link) {
 		list_del(&rx_pkt->link);
 		dma_unmap_single(ipa3_ctx->pdev, rx_pkt->data.dma_addr,
-				IPA_WLAN_COMM_RX_POOL_LOW, DMA_FROM_DEVICE);
+				IPA_WLAN_RX_BUFF_SZ, DMA_FROM_DEVICE);
 		dev_kfree_skb_any(rx_pkt->data.skb);
 		kmem_cache_free(ipa3_ctx->rx_pkt_wrapper_cache, rx_pkt);
 		ipa3_ctx->wc_memb.wlan_comm_free_cnt--;
@@ -2486,8 +2496,7 @@ static int ipa3_wan_rx_pyld_hdlr(struct sk_buff *skb,
 
 		IPA_STATS_INC_CNT(ipa3_ctx->stats.rx_pkts);
 		if (status.endp_dest_idx >= ipa3_ctx->ipa_num_pipes ||
-			status.endp_src_idx >= ipa3_ctx->ipa_num_pipes ||
-			status.pkt_len > IPA_GENERIC_AGGR_BYTE_LIMIT * 1024) {
+			status.endp_src_idx >= ipa3_ctx->ipa_num_pipes) {
 			IPAERR("status fields invalid\n");
 			WARN_ON(1);
 			goto bail;
@@ -2600,11 +2609,8 @@ void ipa3_lan_rx_cb(void *priv, enum ipa_dp_evt_type evt, unsigned long data)
 	metadata = status.metadata;
 	ucp = status.ucp;
 	ep = &ipa3_ctx->ep[src_pipe];
-	if (unlikely(src_pipe >= ipa3_ctx->ipa_num_pipes ||
-		!ep->valid ||
-		!ep->client_notify)) {
-		IPAERR("drop pipe=%d ep_valid=%d client_notify=%p\n",
-		  src_pipe, ep->valid, ep->client_notify);
+	if (unlikely(src_pipe >= ipa3_ctx->ipa_num_pipes)) {
+		IPAERR("drop pipe=%d\n", src_pipe);
 		dev_kfree_skb_any(rx_skb);
 		return;
 	}
@@ -2626,7 +2632,12 @@ void ipa3_lan_rx_cb(void *priv, enum ipa_dp_evt_type evt, unsigned long data)
 			metadata, *(u32 *)rx_skb->cb);
 	IPADBG_LOW("ucp: %d\n", *(u8 *)(rx_skb->cb + 4));
 
-	ep->client_notify(ep->priv, IPA_RECEIVE, (unsigned long)(rx_skb));
+	if (likely((!atomic_read(&ep->disconnect_in_progress)) &&
+				ep->valid && ep->client_notify))
+		ep->client_notify(ep->priv, IPA_RECEIVE,
+				(unsigned long)(rx_skb));
+	else
+		dev_kfree_skb_any(rx_skb);
 }
 
 static void ipa3_recycle_rx_wrapper(struct ipa3_rx_pkt_wrapper *rx_pkt)
@@ -2936,7 +2947,6 @@ static int ipa3_assign_policy(struct ipa_sys_connect_params *in,
 			INIT_DELAYED_WORK(&sys->replenish_rx_work,
 				ipa3_replenish_rx_work_func);
 			atomic_set(&sys->curr_polling_state, 0);
-			sys->rx_buff_sz = IPA_ODU_RX_BUFF_SZ;
 			sys->rx_pool_sz = in->desc_fifo_sz /
 				IPA_FIFO_ELEMENT_SIZE - 1;
 			if (sys->rx_pool_sz > IPA_ODU_RX_POOL_SZ)
@@ -2944,8 +2954,23 @@ static int ipa3_assign_policy(struct ipa_sys_connect_params *in,
 			sys->pyld_hdlr = ipa3_odu_rx_pyld_hdlr;
 			sys->get_skb = ipa3_get_skb_ipa_rx;
 			sys->free_skb = ipa3_free_skb_rx;
-			sys->free_rx_wrapper = ipa3_free_rx_wrapper;
-			sys->repl_hdlr = ipa3_replenish_rx_cache;
+			/* recycle skb for GSB use case */
+			if (ipa3_ctx->ipa_hw_type >= IPA_HW_v4_0) {
+				sys->free_rx_wrapper =
+					ipa3_free_rx_wrapper;
+				sys->repl_hdlr =
+					ipa3_replenish_rx_cache;
+				/* Overwrite buffer size & aggr limit for GSB */
+				sys->rx_buff_sz = IPA_GENERIC_RX_BUFF_SZ(
+					IPA_GSB_RX_BUFF_BASE_SZ);
+				in->ipa_ep_cfg.aggr.aggr_byte_limit =
+					IPA_GSB_AGGR_BYTE_LIMIT;
+			} else {
+				sys->free_rx_wrapper =
+					ipa3_free_rx_wrapper;
+				sys->repl_hdlr = ipa3_replenish_rx_cache;
+				sys->rx_buff_sz = IPA_ODU_RX_BUFF_SZ;
+			}
 		} else if (in->client ==
 				IPA_CLIENT_MEMCPY_DMA_ASYNC_CONS) {
 			IPADBG("assigning policy to client:%d",
@@ -3684,8 +3709,13 @@ static int ipa_gsi_setup_channel(struct ipa_sys_connect_params *in,
 	ep->gsi_mem_info.chan_ring_base_vaddr =
 		gsi_channel_props.ring_base_vaddr;
 
-	gsi_channel_props.use_db_eng = GSI_CHAN_DB_MODE;
+	if (ipa3_ctx->ipa_hw_type >= IPA_HW_v4_0)
+		gsi_channel_props.use_db_eng = GSI_CHAN_DIRECT_MODE;
+	else
+		gsi_channel_props.use_db_eng = GSI_CHAN_DB_MODE;
 	gsi_channel_props.max_prefetch = GSI_ONE_PREFETCH_SEG;
+	gsi_channel_props.prefetch_mode =
+		ipa_get_ep_prefetch_mode(ep->client);
 	if (ep->client == IPA_CLIENT_APPS_CMD_PROD)
 		gsi_channel_props.low_weight = IPA_GSI_MAX_CH_LOW_WEIGHT;
 	else
@@ -3719,15 +3749,11 @@ static int ipa_gsi_setup_channel(struct ipa_sys_connect_params *in,
 		goto fail_write_channel_scratch;
 	}
 
-	result = gsi_start_channel(ep->gsi_chan_hdl);
-	if (result != GSI_STATUS_SUCCESS)
-		goto fail_start_channel;
 	if (ep->client == IPA_CLIENT_MEMCPY_DMA_SYNC_CONS)
 		gsi_config_channel_mode(ep->gsi_chan_hdl,
 				GSI_CHAN_MODE_POLL);
 	return 0;
 
-fail_start_channel:
 fail_write_channel_scratch:
 	if (gsi_dealloc_channel(ep->gsi_chan_hdl)
 		!= GSI_STATUS_SUCCESS) {
@@ -3924,7 +3950,12 @@ int ipa_gsi_ch20_wa(void)
 		dma_alloc_coherent(ipa3_ctx->pdev, gsi_channel_props.ring_len,
 		&dma_addr, 0);
 	gsi_channel_props.ring_base_addr = dma_addr;
-	gsi_channel_props.use_db_eng = GSI_CHAN_DB_MODE;
+
+	if (ipa3_ctx->ipa_hw_type >= IPA_HW_v4_0)
+		gsi_channel_props.use_db_eng = GSI_CHAN_DIRECT_MODE;
+	else
+		gsi_channel_props.use_db_eng = GSI_CHAN_DB_MODE;
+
 	gsi_channel_props.max_prefetch = GSI_ONE_PREFETCH_SEG;
 	gsi_channel_props.low_weight = 1;
 	gsi_channel_props.err_cb = ipa_gsi_chan_err_cb;

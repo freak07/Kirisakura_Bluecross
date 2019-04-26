@@ -1,4 +1,4 @@
-/* Copyright (c) 2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -10,20 +10,12 @@
  * GNU General Public License for more details.
  */
 
-/dts-v1/;
+#ifndef _CAM_IR_LED_SOC_H_
+#define _CAM_IR_LED_SOC_H_
 
-/ {
-	#address-cells = <2>;
-	#size-cells = <2>;
-	model = "SDM845 Virtual Platform";
-	compatible = "qcom,sdm845-vm";
+#include "cam_ir_led_dev.h"
 
-	interrupt-parent = <&intc>;
+int cam_ir_led_get_dt_data(struct cam_ir_led_ctrl *fctrl,
+	struct cam_hw_soc_info *soc_info);
 
-	intc: interrupt-controller {
-		interrupt-controller;
-		compatible = "arm,cortex-a9-gic";
-		#interrupt-cells = <3>;
-		interrupt-parent = <&intc>;
-	};
-};
+#endif /*_CAM_IR_LED_SOC_H_*/

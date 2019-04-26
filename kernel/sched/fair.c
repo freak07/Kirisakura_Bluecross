@@ -7641,11 +7641,17 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int sd_flag, int wake_f
 			cpumask_test_cpu(cpu, tsk_cpus_allowed(p)));
 	}
 
-	if (energy_aware()) {
-		new_cpu = find_energy_efficient_cpu(p, prev_cpu);
-		if (new_cpu >= 0)
-			return new_cpu;
-		new_cpu = prev_cpu;
+	if (energy_aware() && !(cpu_rq(prev_cpu)->rd->overutilized)) {
+		/*
+		 * If the sync flag is set but ignored, prefer to
+		 * select cpu in the same cluster as current. So
+		 * if current is a big cpu and sync is set, indicate
+		 * that the selection algorithm for a boosted task
+		 * should be used.
+		 */
+		bool sync_boost = sync && cpu >= start_cpu(p, true, NULL);
+
+		return select_energy_cpu_brute(p, prev_cpu, sync_boost);
 	}
 
 	rcu_read_lock();

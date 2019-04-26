@@ -54,7 +54,7 @@ static void enable_hbm(int enable)
 	u32 target_range = enable ? bl_g->hbm->num_ranges - 1 : 0;
 	range = hbm->ranges + target_range;
 
-	if(dsi_panel_cmd_set_transfer(panel, &range->dsi_cmd))
+	if(dsi_panel_cmd_set_transfer(panel, &range->entry_cmd))
 		pr_err("Failed to send command for range %d\n",	enable);
 }
 

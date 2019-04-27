@@ -345,6 +345,15 @@ struct cam_isp_clock_config {
 } __attribute__((packed));
 
 /**
+ * struct cam_isp_csid_clock_config - CSID clock configuration
+ *
+ * @csid_clock                  CSID clock
+ */
+struct cam_isp_csid_clock_config {
+	uint64_t                       csid_clock;
+} __attribute__((packed));
+
+/**
  * struct cam_isp_bw_vote - Bandwidth vote information
  *
  * @resource_id:                Resource ID

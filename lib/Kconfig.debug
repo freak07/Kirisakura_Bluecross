@@ -947,6 +947,14 @@ config PANIC_ON_OOPS_VALUE
 	default 0 if !PANIC_ON_OOPS
 	default 1 if PANIC_ON_OOPS
 
+config PANIC_ON_WARN_DEFAULT_ENABLE
+	bool "Panic on warn"
+	default n
+	help
+	  Say Y here to enable the kernel to panic when detect warnings. This
+	  has the same effect as setting panic_on_warn on the kernel command
+	  line.
+
 config PANIC_TIMEOUT
 	int "panic timeout"
 	default 0
@@ -1931,9 +1939,9 @@ config TEST_HASH
 	tristate "Perform selftest on hash functions"
 	default n
 	help
-	  Enable this option to test the kernel's integer (<linux/hash,h>)
-	  and string (<linux/stringhash.h>) hash functions on boot
-	  (or module load).
+	  Enable this option to test the kernel's integer (<linux/hash.h>),
+	  string (<linux/stringhash.h>), and siphash (<linux/siphash.h>)
+	  hash functions on boot (or module load).
 
 	  This is intended to help people writing architecture-specific
 	  optimized versions.  If unsure, say N.

@@ -1500,7 +1500,6 @@ config NR_CPUS
 
 config HOTPLUG_CPU
 	bool "Support for hot-pluggable CPUs"
-	select GENERIC_IRQ_MIGRATION
 	depends on SMP
 	select GENERIC_IRQ_MIGRATION
 	help

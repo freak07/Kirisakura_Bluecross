@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2019 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -517,10 +517,11 @@ static int __hdd_netdev_notifier_call(struct notifier_block *nb,
 				msecs_to_jiffies(WLAN_WAIT_TIME_ABORTSCAN));
 			if (!rc)
 				hdd_err("Timeout occurred while waiting for abortscan");
-		} else {
-			cds_flush_work(&adapter->scan_block_work);
-			hdd_debug("Scan is not Pending from user");
 		}
+		cds_flush_work(&adapter->scan_block_work);
+		/* Need to clean up blocked scan request */
+		wlan_hdd_cfg80211_scan_block_cb(&adapter->scan_block_work);
+		hdd_debug("Scan is not Pending from user");
 		/*
 		 * After NETDEV_GOING_DOWN, kernel calls hdd_stop.Irrespective
 		 * of return status of hdd_stop call, kernel resets the IFF_UP
@@ -4306,6 +4307,9 @@ hdd_adapter_t *hdd_open_adapter(hdd_context_t *hdd_ctx, uint8_t session_type,
 	}
 
 	INIT_WORK(&adapter->scan_block_work, wlan_hdd_cfg80211_scan_block_cb);
+	qdf_list_create(&adapter->blocked_scan_request_q,
+			CFG_MAX_SCAN_COUNT_MAX);
+	qdf_mutex_create(&adapter->blocked_scan_request_q_lock);
 
 	cfgState = WLAN_HDD_GET_CFG_STATE_PTR(adapter);
 	mutex_init(&cfgState->remain_on_chan_ctx_lock);
@@ -4383,6 +4387,9 @@ QDF_STATUS hdd_close_adapter(hdd_context_t *hdd_ctx, hdd_adapter_t *adapter,
 		hdd_debug("wait for bus bw work to flush");
 		hdd_bus_bw_compute_timer_stop(hdd_ctx);
 		cancel_work_sync(&hdd_ctx->bus_bw_work);
+
+		qdf_list_destroy(&adapter->blocked_scan_request_q);
+		qdf_mutex_destroy(&adapter->blocked_scan_request_q_lock);
 
 		/* cleanup adapter */
 		cds_clear_concurrency_mode(adapter->device_mode);
@@ -4679,6 +4686,12 @@ QDF_STATUS hdd_stop_adapter(hdd_context_t *hdd_ctx, hdd_adapter_t *adapter,
 		wlan_hdd_tdls_exit(adapter);
 		wlan_hdd_cleanup_remain_on_channel_ctx(adapter);
 		hdd_clear_fils_connection_info(adapter);
+		qdf_ret_status = sme_roam_del_pmkid_from_cache(
+							hdd_ctx->hHal,
+							adapter->sessionId,
+							NULL, true);
+		if (QDF_IS_STATUS_ERROR(qdf_ret_status))
+			hdd_err("Cannot flush PMKIDCache");
 
 #ifdef WLAN_OPEN_SOURCE
 		cancel_work_sync(&adapter->ipv4NotifierWorkQueue);
@@ -8301,6 +8314,8 @@ void hdd_indicate_mgmt_frame(tSirSmeMgmtFrameInd *frame_ind)
 	hdd_adapter_t *adapter = NULL;
 	void *cds_context = NULL;
 	int i;
+	struct ieee80211_mgmt *mgmt =
+		(struct ieee80211_mgmt *)frame_ind->frameBuf;
 
 	/* Get the global VOSS context.*/
 	cds_context = cds_get_global_context();
@@ -8313,6 +8328,11 @@ void hdd_indicate_mgmt_frame(tSirSmeMgmtFrameInd *frame_ind)
 
 	if (0 != wlan_hdd_validate_context(hdd_ctx))
 		return;
+
+	if (frame_ind->frame_len < ieee80211_hdrlen(mgmt->frame_control)) {
+		hdd_err(" Invalid frame length");
+		return;
+	}
 
 	if (SME_SESSION_ID_ANY == frame_ind->sessionId) {
 		for (i = 0; i < CSR_ROAM_SESSION_MAX; i++) {
@@ -12935,6 +12955,11 @@ void hdd_set_roaming_in_progress(bool value)
 
 	hdd_ctx->roaming_in_progress = value;
 	hdd_debug("Roaming in Progress set to %d", value);
+	if (!hdd_ctx->roaming_in_progress) {
+		/* Reset scan reject params on successful roam complete */
+		hdd_debug("Reset scan reject params");
+		hdd_init_scan_reject_params(hdd_ctx);
+	}
 }
 
 /**

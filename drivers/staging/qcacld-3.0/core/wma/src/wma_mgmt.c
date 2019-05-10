@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2019 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -1714,10 +1714,11 @@ static QDF_STATUS wma_setup_install_key_cmd(tp_wma_handle wma_handle,
 	params.key_len = key_params->key_len;
 
 #ifdef WLAN_FEATURE_11W
+	iface = &wma_handle->interfaces[key_params->vdev_id];
+
 	if ((key_params->key_type == eSIR_ED_AES_128_CMAC) ||
 	   (key_params->key_type == eSIR_ED_AES_GMAC_128) ||
 	   (key_params->key_type == eSIR_ED_AES_GMAC_256)) {
-		iface = &wma_handle->interfaces[key_params->vdev_id];
 		if (iface) {
 			iface->key.key_length = key_params->key_len;
 			iface->key.key_cipher = params.key_cipher;
@@ -1731,6 +1732,9 @@ static QDF_STATUS wma_setup_install_key_cmd(tp_wma_handle wma_handle,
 					     CMAC_IPN_LEN);
 		}
 	}
+
+	if (key_params->unicast && iface)
+		iface->ucast_key_cipher = params.key_cipher;
 #endif /* WLAN_FEATURE_11W */
 
 	WMA_LOGD("Key setup : vdev_id %d key_idx %d key_type %d key_len %d",
@@ -1754,6 +1758,7 @@ static QDF_STATUS wma_setup_install_key_cmd(tp_wma_handle wma_handle,
 	if (iface)
 		iface->is_waiting_for_key = false;
 
+	qdf_mem_zero(&params, sizeof(struct set_key_params));
 	return status;
 }
 
@@ -1879,6 +1884,8 @@ void wma_set_bsskey(tp_wma_handle wma_handle, tpSetBssKeyParams key_info)
 	wma_handle->ibss_started++;
 	/* TODO: Should we wait till we get HTT_T2H_MSG_TYPE_SEC_IND? */
 	key_info->status = QDF_STATUS_SUCCESS;
+
+	qdf_mem_zero(&key_params, sizeof(struct wma_set_key_params));
 
 out:
 	wma_send_msg_high_priority(wma_handle,
@@ -2170,6 +2177,7 @@ void wma_set_stakey(tp_wma_handle wma_handle, tpSetStaKeyParams key_info)
 		key_params.key_len = key_info->key[i].keyLength;
 		status = wma_setup_install_key_cmd(wma_handle, &key_params,
 						   opmode);
+		qdf_mem_zero(&key_params, sizeof(struct wma_set_key_params));
 		if (status == QDF_STATUS_E_NOMEM) {
 			WMA_LOGE("%s:Failed to setup install key buf",
 				 __func__);
@@ -3357,6 +3365,7 @@ int wma_process_rmf_frame(tp_wma_handle wma_handle,
 {
 	uint8_t *orig_hdr;
 	uint8_t *ccmp;
+	uint8_t mic_len, hdr_len;
 
 	if ((wh)->i_fc[1] & IEEE80211_FC1_WEP) {
 		if (IEEE80211_IS_BROADCAST(wh->i_addr1) ||
@@ -3383,15 +3392,22 @@ int wma_process_rmf_frame(tp_wma_handle wma_handle,
 			return -EINVAL;
 		}
 
+		if (iface->ucast_key_cipher == WMI_CIPHER_AES_GCM) {
+			hdr_len = WLAN_IEEE80211_GCMP_HEADERLEN;
+			mic_len = WLAN_IEEE80211_GCMP_MICLEN;
+		} else {
+			hdr_len = IEEE80211_CCMP_HEADERLEN;
+			mic_len = IEEE80211_CCMP_MICLEN;
+		}
 		/* Strip privacy headers (and trailer)
 		 * for a received frame
 		 */
 		qdf_mem_move(orig_hdr +
-			IEEE80211_CCMP_HEADERLEN, wh,
+			hdr_len, wh,
 			sizeof(*wh));
 		qdf_nbuf_pull_head(wbuf,
-			IEEE80211_CCMP_HEADERLEN);
-		qdf_nbuf_trim_tail(wbuf, IEEE80211_CCMP_MICLEN);
+			hdr_len);
+		qdf_nbuf_trim_tail(wbuf, mic_len);
 		/*
 		 * CCMP header has been pulled off
 		 * reinitialize the start pointer of mac header

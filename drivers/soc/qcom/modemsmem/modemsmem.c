@@ -21,7 +21,7 @@
 #include <linux/fs.h>
 #include <linux/of.h>
 #include <linux/ctype.h>
-#include <linux/io.h>
+#include <asm/io.h>
 #include <soc/qcom/smem.h>
 #include "modemsmem.h"
 #include <soc/qcom/socinfo.h>
@@ -51,9 +51,7 @@ __setup("androidboot.mode=", get_bootmode);
 
 static bool is_factory_bootmode(void)
 {
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(factory_bootmodes); i++)
+	for (int i = 0; i < ARRAY_SIZE(factory_bootmodes); i++)
 		if (!strncmp(factory_bootmodes[i], bootmode, sizeof(bootmode)))
 			return true;
 	return false;

@@ -1321,12 +1321,12 @@ static bool psci_enter_sleep(struct lpm_cpu *cpu, int idx, bool from_idle)
 
 	if (from_idle && cpu->levels[idx].use_bc_timer) {
 		/*
-		 * tick_broadcast_enter can change the affinity of the
-		 * broadcast timer interrupt, during which interrupt will
-		 * be disabled and enabled back. To avoid system pm ops
-		 * doing any interrupt state save or restore in between
-		 * this window hold the lock.
-		 */
+		* tick_broadcast_enter can change the affinity of the
+		* broadcast timer interrupt, during which interrupt will
+		* be disabled and enabled back. To avoid system pm ops
+		* doing any interrupt state save or restore in between
+		* this window hold the lock.
+		*/
 		spin_lock(&bc_timer_lock);
 		ret = tick_broadcast_enter();
 		spin_unlock(&bc_timer_lock);

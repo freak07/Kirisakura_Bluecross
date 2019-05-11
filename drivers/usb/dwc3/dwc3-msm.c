@@ -3332,11 +3332,11 @@ static ssize_t usb_compliance_mode_store(struct device *dev,
 }
 static DEVICE_ATTR_RW(usb_compliance_mode);
 
-
 static ssize_t auto_vbus_src_sel_threshold_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
 	struct dwc3_msm *mdwc = dev_get_drvdata(dev);
+
 	return snprintf(buf, PAGE_SIZE, "%u\n",
 		mdwc->auto_vbus_src_sel_threshold);
 }

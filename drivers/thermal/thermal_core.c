@@ -612,7 +612,6 @@ static void update_temperature(struct thermal_zone_device *tz)
 	store_temperature(tz, temp);
 }
 
-
 static void thermal_zone_device_init(struct thermal_zone_device *tz)
 {
 	struct thermal_instance *pos;
@@ -647,7 +646,6 @@ void thermal_zone_device_update_temp(struct thermal_zone_device *tz,
 		handle_thermal_trip(tz, count);
 }
 EXPORT_SYMBOL(thermal_zone_device_update_temp);
-
 
 void thermal_zone_device_update(struct thermal_zone_device *tz,
 				enum thermal_notify_event event)

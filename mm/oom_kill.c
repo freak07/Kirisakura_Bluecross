@@ -620,6 +620,7 @@ void wake_oom_reaper(struct task_struct *tsk)
 	 * path.
 	 */
 	spin_lock(&oom_reaper_lock);
+
 	/* mm is already queued? */
 	if (test_and_set_bit(MMF_OOM_REAP_QUEUED, &tsk->signal->oom_mm->flags)) {
 		spin_unlock(&oom_reaper_lock);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2018, The Linux foundation. All rights reserved.
+ * Copyright (c) 2017-2019, The Linux foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1804,7 +1804,7 @@ static void msm_geni_serial_set_termios(struct uart_port *uport,
 		break;
 	}
 
-
+	uport->status  &= ~(UPSTAT_AUTOCTS);
 	/* stop bits */
 	if (termios->c_cflag & CSTOPB)
 		stop_bit_len = TX_STOP_BIT_LEN_2;
@@ -1812,8 +1812,10 @@ static void msm_geni_serial_set_termios(struct uart_port *uport,
 		stop_bit_len = TX_STOP_BIT_LEN_1;
 
 	/* flow control, clear the CTS_MASK bit if using flow control. */
-	if (termios->c_cflag & CRTSCTS)
+	if (termios->c_cflag & CRTSCTS) {
 		tx_trans_cfg &= ~UART_CTS_MASK;
+		uport->status |= UPSTAT_AUTOCTS;
+	}
 	else
 		tx_trans_cfg |= UART_CTS_MASK;
 	/* status bits to ignore */

@@ -311,7 +311,7 @@ void sdhci_msm_ice_hci_update_noncq_cfg(struct sdhci_host *host,
 	 */
 	/* Configure ICE bypass mode */
 	crypto_params |=
-		(!bypass & MASK_SDHCI_MSM_ICE_HCI_PARAM_CE)
+		((!bypass) & MASK_SDHCI_MSM_ICE_HCI_PARAM_CE)
 			<< OFFSET_SDHCI_MSM_ICE_HCI_PARAM_CE;
 	/* Configure Crypto Configure Index (CCI) */
 	crypto_params |= (key_index &
@@ -405,6 +405,7 @@ int sdhci_msm_ice_cmdq_cfg(struct sdhci_host *host,
 		return -EINVAL;
 	req = mrq->req;
 	if (req && req->bio) {
+
 #ifdef CONFIG_PFK
 		if (bio_dun(req->bio)) {
 			dun = bio_dun(req->bio);

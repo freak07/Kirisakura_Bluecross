@@ -47,16 +47,12 @@ static void record_vmstat(void)
 			global_node_page_state(NR_INACTIVE_FILE);
 	vmstat.anon = global_node_page_state(NR_ACTIVE_ANON) +
 			global_node_page_state(NR_INACTIVE_ANON);
-	vmstat.ion = global_node_page_state(NR_ION_HEAP) +
-		(global_node_page_state(NR_INDIRECTLY_RECLAIMABLE_BYTES)
-			>> PAGE_SHIFT);
+	vmstat.ion = global_node_page_state(NR_ION_HEAP);
 
 	vmstat.ws_refault = global_node_page_state(WORKINGSET_REFAULT);
 	vmstat.ws_activate = global_node_page_state(WORKINGSET_ACTIVATE);
 	vmstat.mapped = global_node_page_state(NR_FILE_MAPPED);
 
-	/* No want to make lock dependency between vmstat_lock and hotplug */
-	get_online_cpus();
 	for_each_online_cpu(cpu) {
 		struct vm_event_state *this = &per_cpu(vm_event_states, cpu);
 
@@ -72,7 +68,6 @@ static void record_vmstat(void)
 		vmstat.compact_scan += this->event[COMPACTFREE_SCANNED] +
 					this->event[COMPACTMIGRATE_SCANNED];
 	}
-	put_online_cpus();
 	trace_mm_event_vmstat_record(&vmstat);
 }
 

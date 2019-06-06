@@ -671,7 +671,7 @@ static int mmc_decode_ext_csd(struct mmc_card *card, u8 *ext_csd)
 			 * see JEDEC JESD84-B51 section 7.4.19
 			 */
 			card->ext_csd.cmdq_depth =
-				ext_csd[EXT_CSD_CMDQ_DEPTH] + 1;
+				min(ext_csd[EXT_CSD_CMDQ_DEPTH] + 1, 16);
 			pr_info("%s: CMDQ supported: depth: %d\n",
 				mmc_hostname(card->host),
 				card->ext_csd.cmdq_depth);
@@ -887,6 +887,68 @@ static ssize_t mmc_dsr_show(struct device *dev,
 
 static DEVICE_ATTR(dsr, S_IRUGO, mmc_dsr_show, NULL);
 
+static ssize_t mmc_model_show(struct device *dev,
+			    struct device_attribute *attr,
+			    char *buf)
+{
+	struct mmc_card *card = mmc_dev_to_card(dev);
+	char model_names[32];
+
+	if (!strncmp(card->cid.prod_name, "DD6DMB", 6))
+		strlcpy(model_names, "KMDD6001DM-B320", sizeof(model_names));
+	else if (!strncmp(card->cid.prod_name, "DH6DAB", 6))
+		strlcpy(model_names, "KMDH6001DA-B422", sizeof(model_names));
+	else if (!strncmp(card->cid.prod_name, "hB8aP>", 6))
+		strlcpy(model_names, "H9HP27ACPMMDAR-KMM", sizeof(model_names));
+	else if (!strncmp(card->cid.prod_name, "hC8aP>", 6))
+		strlcpy(model_names, "H9HP52ACPMADAR-KMM", sizeof(model_names));
+	else if (!strncmp(card->cid.prod_name, "S0J9K8", 6))
+		strlcpy(model_names, "MT29VZZZAD8DQKSL-046 W.9K8",
+				sizeof(model_names));
+	else
+		strlcpy(model_names, "UNKNOWN", sizeof(model_names));
+
+	return snprintf(buf, sizeof(model_names), "%s\n", model_names);
+}
+
+static DEVICE_ATTR(model, 0444, mmc_model_show, NULL);
+
+static ssize_t mmc_vendor_show(struct device *dev,
+			    struct device_attribute *attr,
+			    char *buf)
+{
+	struct mmc_card *card = mmc_dev_to_card(dev);
+	char vendor_names[16];
+
+	switch (card->cid.manfid) {
+	case CID_MANFID_SANDISK:
+		strlcpy(vendor_names, "SANDISK", sizeof(vendor_names));
+		break;
+	case CID_MANFID_TOSHIBA:
+		strlcpy(vendor_names, "TOSHIBA", sizeof(vendor_names));
+		break;
+	case CID_MANFID_MICRON:
+		strlcpy(vendor_names, "MICRON", sizeof(vendor_names));
+		break;
+	case CID_MANFID_SAMSUNG:
+		strlcpy(vendor_names, "SAMSUNG", sizeof(vendor_names));
+		break;
+	case CID_MANFID_KINGSTON:
+		strlcpy(vendor_names, "KINGSTON", sizeof(vendor_names));
+		break;
+	case CID_MANFID_HYNIX:
+		strlcpy(vendor_names, "SKhynix", sizeof(vendor_names));
+		break;
+	default:
+		strlcpy(vendor_names, "UNKNOWN", sizeof(vendor_names));
+		break;
+	}
+
+	return snprintf(buf, sizeof(vendor_names), "%s\n", vendor_names);
+}
+
+static DEVICE_ATTR(vendor, 0444, mmc_vendor_show, NULL);
+
 static struct attribute *mmc_std_attrs[] = {
 	&dev_attr_cid.attr,
 	&dev_attr_csd.attr,
@@ -911,6 +973,8 @@ static struct attribute *mmc_std_attrs[] = {
 	&dev_attr_rel_sectors.attr,
 	&dev_attr_ocr.attr,
 	&dev_attr_dsr.attr,
+	&dev_attr_model.attr,
+	&dev_attr_vendor.attr,
 	NULL,
 };
 ATTRIBUTE_GROUPS(mmc_std);
@@ -3090,7 +3154,7 @@ static int mmc_pre_hibernate(struct mmc_host *host)
 	host->caps2 &= ~MMC_CAP2_CLK_SCALE;
 	host->clk_scaling.state = MMC_LOAD_HIGH;
 	ret = mmc_clk_update_freq(host, host->card->clk_scaling_highest,
-				host->clk_scaling.state);
+				host->clk_scaling.state, 0);
 	if (ret)
 		pr_err("%s: %s: Setting clk frequency to max failed: %d\n",
 				mmc_hostname(host), __func__, ret);

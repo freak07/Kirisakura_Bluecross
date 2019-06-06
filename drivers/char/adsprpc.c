@@ -103,6 +103,7 @@
 #define FASTRPC_LINK_DISCONNECTING (0x7)
 #define FASTRPC_LINK_REMOTE_DISCONNECTING (0x8)
 #define FASTRPC_GLINK_INTENT_LEN  (64)
+#define FASTRPC_GLINK_INTENT_NUM  (16)
 
 #define PERF_KEYS \
 	"count:flush:map:copy:glink:getargs:putargs:invalidate:invoke:tid:ptr"
@@ -3271,8 +3272,8 @@ static ssize_t fastrpc_debugfs_read(struct file *filp, char __user *buffer,
 		}
 
 		len += scnprintf(fileinfo + len, DEBUGFS_SIZE - len,
-					"\n%s %s %s\n", title,
-					" LIST OF INTERRUPTED SMQCONTEXTS ", title);
+			"\n%s %s %s\n", title,
+			" LIST OF INTERRUPTED SMQCONTEXTS ", title);
 
 		len += scnprintf(fileinfo + len, DEBUGFS_SIZE - len,
 			"%-20s|%-10s|%-10s|%-10s|%-20s\n",
@@ -3303,7 +3304,7 @@ static const struct file_operations debugfs_fops = {
 static int fastrpc_channel_open(struct fastrpc_file *fl)
 {
 	struct fastrpc_apps *me = &gfa;
-	int cid, err = 0;
+	int cid, ii, err = 0;
 
 	mutex_lock(&me->smd_mutex);
 
@@ -3351,13 +3352,14 @@ static int fastrpc_channel_open(struct fastrpc_file *fl)
 		pr_info("'opened /dev/%s c %d %d'\n", gcinfo[cid].name,
 						MAJOR(me->dev_no), cid);
 		if (me->glink) {
-			err = glink_queue_rx_intent(me->channel[cid].chan, NULL,
-				FASTRPC_GLINK_INTENT_LEN);
-			err |= glink_queue_rx_intent(me->channel[cid].chan,
-				NULL, FASTRPC_GLINK_INTENT_LEN);
-			if (err)
-				pr_warn("adsprpc: initial intent fail for %d err %d\n",
-					cid, err);
+			for (ii = 0; ii < FASTRPC_GLINK_INTENT_NUM ; ii++) {
+				err = glink_queue_rx_intent(
+					me->channel[cid].chan, NULL,
+					FASTRPC_GLINK_INTENT_LEN);
+				if (err)
+					pr_warn("adsprpc: initial intent fail for %d err %d\n",
+						cid, err);
+			}
 		}
 		if (cid == 0 && me->channel[cid].ssrcount !=
 				 me->channel[cid].prevssrcount) {
@@ -3834,8 +3836,16 @@ static int fastrpc_get_service_location_notify(struct notifier_block *nb,
 				pdr->domain_list[i].name,
 				pdr->domain_list[i].instance_id,
 				&spd->pdrnb, &curr_state);
-			if (IS_ERR(spd->pdrhandle))
+			if (IS_ERR(spd->pdrhandle)) {
 				pr_err("ADSPRPC: Unable to register notifier\n");
+			} else if (curr_state ==
+				SERVREG_NOTIF_SERVICE_STATE_UP_V01) {
+				pr_info("ADSPRPC: STATE_UP_V01 received\n");
+				spd->ispdup = 1;
+			} else if (curr_state ==
+				SERVREG_NOTIF_SERVICE_STATE_UNINIT_V01) {
+				pr_info("ADSPRPC: STATE_UNINIT_V01 received\n");
+			}
 			break;
 		}
 	}

@@ -5379,7 +5379,7 @@ QDF_STATUS csr_roam_set_bss_config_cfg(tpAniSirGlobal pMac, uint32_t sessionId,
 
 static
 QDF_STATUS csr_roam_stop_network(tpAniSirGlobal pMac, uint32_t sessionId,
-				 tCsrRoamProfile *pProfile,
+				 tCsrRoamProfile *roam_profile,
 				 tSirBssDescription *pBssDesc,
 				 tDot11fBeaconIEs *pIes)
 {
@@ -5398,7 +5398,7 @@ QDF_STATUS csr_roam_stop_network(tpAniSirGlobal pMac, uint32_t sessionId,
 
 	sme_debug("session id: %d", sessionId);
 
-	status = csr_roam_prepare_bss_config(pMac, pProfile, pBssDesc,
+	status = csr_roam_prepare_bss_config(pMac, roam_profile, pBssDesc,
 			pBssConfig, pIes);
 	if (QDF_IS_STATUS_SUCCESS(status)) {
 		eCsrRoamSubState substate;
@@ -5408,10 +5408,11 @@ QDF_STATUS csr_roam_stop_network(tpAniSirGlobal pMac, uint32_t sessionId,
 		/* This will allow to pass cbMode during join req */
 		pSession->bssParams.cbMode = pBssConfig->cbMode;
 		/* For IBSS, we need to prepare some more information */
-		if (csr_is_bss_type_ibss(pProfile->BSSType) ||
-				CSR_IS_INFRA_AP(pProfile))
-			csr_roam_prepare_bss_params(pMac, sessionId, pProfile,
-				pBssDesc, pBssConfig, pIes);
+		if (csr_is_bss_type_ibss(roam_profile->BSSType) ||
+				CSR_IS_INFRA_AP(roam_profile))
+			csr_roam_prepare_bss_params(pMac, sessionId,
+						    roam_profile, pBssDesc,
+						    pBssConfig, pIes);
 
 		/*
 		 * If we are in an IBSS, then stop the IBSS...
@@ -5441,22 +5442,22 @@ QDF_STATUS csr_roam_stop_network(tpAniSirGlobal pMac, uint32_t sessionId,
 				 * parameters for this Bss.
 				 */
 				status = csr_roam_set_bss_config_cfg(pMac,
-						sessionId, pProfile, pBssDesc,
-						pBssConfig, pIes, false);
-		} else if (pBssDesc ||
-					CSR_IS_INFRA_AP(pProfile)) {
+						sessionId, roam_profile,
+						pBssDesc, pBssConfig, pIes,
+						false);
+		} else if (pBssDesc || CSR_IS_INFRA_AP(roam_profile)) {
 			/*
 			 * Neither in IBSS nor in Infra. We can go ahead and set
 			 * the cfg for tne new network... nothing to stop.
 			 */
-			bool is11rRoamingFlag = false;
+			bool is_11r_roamingFlag = false;
 
-			is11rRoamingFlag = csr_roam_is11r_assoc(pMac,
+			is_11r_roamingFlag = csr_roam_is11r_assoc(pMac,
 							sessionId);
 			/* Set parameters for this Bss. */
 			status = csr_roam_set_bss_config_cfg(pMac, sessionId,
-					pProfile, pBssDesc, pBssConfig, pIes,
-					is11rRoamingFlag);
+					roam_profile, pBssDesc, pBssConfig,
+					pIes, is_11r_roamingFlag);
 		}
 	} /* Success getting BSS config info */
 	qdf_mem_free(pBssConfig);
@@ -6202,7 +6203,7 @@ static QDF_STATUS csr_roam_trigger_reassociate(tpAniSirGlobal mac_ctx,
 
 QDF_STATUS csr_roam_process_command(tpAniSirGlobal pMac, tSmeCmd *pCommand)
 {
-	QDF_STATUS status = QDF_STATUS_SUCCESS;
+	QDF_STATUS lock_status, status = QDF_STATUS_SUCCESS;
 	tCsrRoamInfo roamInfo;
 	uint32_t sessionId = pCommand->sessionId;
 	tCsrRoamSession *pSession = CSR_GET_SESSION(pMac, sessionId);
@@ -6225,7 +6226,18 @@ QDF_STATUS csr_roam_process_command(tpAniSirGlobal pMac, tSmeCmd *pCommand)
 		}
 		status = csr_roam_process_disassoc_deauth(pMac, pCommand,
 				true, false);
+		lock_status = sme_acquire_global_lock(&pMac->sme);
+		if (!QDF_IS_STATUS_SUCCESS(lock_status)) {
+			csr_roam_complete(pMac, eCsrNothingToJoin, NULL);
+			/*
+			 * Return success so that caller will not remove cmd
+			 * again from smeCmdActiveList as it is already removed
+			 * as part of csr_roam_complete.
+			 */
+			return QDF_STATUS_SUCCESS;
+		}
 		csr_free_roam_profile(pMac, sessionId);
+		sme_release_global_lock(&pMac->sme);
 		break;
 	case eCsrSmeIssuedDisassocForHandoff:
 		/* Not to free pMac->roam.pCurRoamProfile (via
@@ -6238,12 +6250,34 @@ QDF_STATUS csr_roam_process_command(tpAniSirGlobal pMac, tSmeCmd *pCommand)
 	case eCsrForcedDisassocMICFailure:
 		status = csr_roam_process_disassoc_deauth(pMac, pCommand,
 				true, true);
+		lock_status = sme_acquire_global_lock(&pMac->sme);
+		if (!QDF_IS_STATUS_SUCCESS(lock_status)) {
+			csr_roam_complete(pMac, eCsrNothingToJoin, NULL);
+			/*
+			 * Return success so that caller will not remove cmd
+			 * again from smeCmdActiveList as it is already removed
+			 * as part of csr_roam_complete.
+			 */
+			return QDF_STATUS_SUCCESS;
+		}
 		csr_free_roam_profile(pMac, sessionId);
+		sme_release_global_lock(&pMac->sme);
 		break;
 	case eCsrForcedDeauth:
 		status = csr_roam_process_disassoc_deauth(pMac, pCommand,
 				false, false);
+		lock_status = sme_acquire_global_lock(&pMac->sme);
+		if (!QDF_IS_STATUS_SUCCESS(lock_status)) {
+			csr_roam_complete(pMac, eCsrNothingToJoin, NULL);
+			/*
+			 * Return success so that caller will not remove cmd
+			 * again from smeCmdActiveList as it is already removed
+			 * as part of csr_roam_complete.
+			 */
+			return QDF_STATUS_SUCCESS;
+		}
 		csr_free_roam_profile(pMac, sessionId);
+		sme_release_global_lock(&pMac->sme);
 		break;
 	case eCsrHddIssuedReassocToSameAP:
 	case eCsrSmeIssuedReassocToSameAP:
@@ -6303,6 +6337,17 @@ QDF_STATUS csr_roam_process_command(tpAniSirGlobal pMac, tSmeCmd *pCommand)
 
 		if (pCommand->u.roamCmd.fUpdateCurRoamProfile) {
 			/* Remember the roaming profile */
+			lock_status = sme_acquire_global_lock(&pMac->sme);
+			if (!QDF_IS_STATUS_SUCCESS(lock_status)) {
+				csr_roam_complete(pMac,
+					eCsrNothingToJoin, NULL);
+				/*
+				 * Return success so that caller will not remove
+				 * cmd again from smeCmdActiveList as it is
+				 * already removed as part of csr_roam_complete.
+				 */
+				return QDF_STATUS_SUCCESS;
+			}
 			csr_free_roam_profile(pMac, sessionId);
 			pSession->pCurRoamProfile =
 					qdf_mem_malloc(sizeof(tCsrRoamProfile));
@@ -6311,6 +6356,7 @@ QDF_STATUS csr_roam_process_command(tpAniSirGlobal pMac, tSmeCmd *pCommand)
 					pSession->pCurRoamProfile,
 					&pCommand->u.roamCmd.roamProfile);
 			}
+			sme_release_global_lock(&pMac->sme);
 		}
 		/*
 		 * At this point original uapsd_mask is saved in
@@ -21933,6 +21979,9 @@ static QDF_STATUS csr_process_roam_sync_callback(tpAniSirGlobal mac_ctx,
 		csr_roam_offload_scan(mac_ctx, session_id,
 				ROAM_SCAN_OFFLOAD_START,
 				REASON_CONNECT);
+		csr_roam_call_callback(mac_ctx, session_id, NULL, 0,
+				       eCSR_ROAM_SYNCH_COMPLETE,
+				       eCSR_ROAM_RESULT_SUCCESS);
 		return status;
 	default:
 		sme_debug("LFR3: callback reason %d", reason);
@@ -21948,10 +21997,8 @@ static QDF_STATUS csr_process_roam_sync_callback(tpAniSirGlobal mac_ctx,
 		return status;
 	}
 	conn_profile = &session->connectedProfile;
-	csr_roam_stop_network(mac_ctx, session_id,
-		session->pCurRoamProfile,
-		bss_desc,
-		ies_local);
+	csr_roam_stop_network(mac_ctx, session_id, session->pCurRoamProfile,
+			      bss_desc, ies_local);
 	ps_global_info->remain_in_power_active_till_dhcp = false;
 	session->connectState = eCSR_ASSOC_STATE_TYPE_INFRA_ASSOCIATED;
 	roam_info = qdf_mem_malloc(sizeof(tCsrRoamInfo));
@@ -21963,7 +22010,7 @@ static QDF_STATUS csr_process_roam_sync_callback(tpAniSirGlobal mac_ctx,
 		return QDF_STATUS_E_NOMEM;
 	}
 	csr_scan_save_roam_offload_ap_to_scan_cache(mac_ctx, roam_synch_data,
-			bss_desc);
+						    bss_desc);
 	roam_info->sessionId = session_id;
 	csr_roam_call_callback(mac_ctx, roam_synch_data->roamedVdevId,
 		roam_info, 0, eCSR_ROAM_TDLS_STATUS_UPDATE,

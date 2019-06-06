@@ -20,13 +20,13 @@
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/gpio/consumer.h>
-#include <linux/platform_device.h>
 
 #define MNH_DDR_NUM_CTL_REG	(558 + 1)
 #define MNH_DDR_NUM_PHY_REG	(1100 + 1)
 #define MNH_DDR_NUM_PI_REG	(191 + 1)
 
 #define MNH_DDR_NUM_FSPS (4)
+#define MNH_DDR_NUM_BANKED_FSPS (3)
 #define MNH_DDR_NUM_BASES (3)
 
 /* arbitrary but sufficient size for phy deltas */
@@ -48,10 +48,10 @@ struct mnh_ddr_internal_state {
 	u32 pi_base;
 	u32 pi[MNH_DDR_NUM_PI_REG];
 	u32 phy_base;
-	u32 phy[MNH_DDR_NUM_FSPS][MNH_DDR_NUM_PHY_REG];
+	u32 phy[MNH_DDR_NUM_BANKED_FSPS][MNH_DDR_NUM_PHY_REG];
 	u32 fsps[MNH_DDR_NUM_FSPS];
-	u32 suspend_fsp;
 	u32 tref[MNH_DDR_NUM_FSPS];
+	struct gpio_desc *iso_n;
 };
 
 enum mnh_ddr_bist_type {
@@ -59,18 +59,15 @@ enum mnh_ddr_bist_type {
 	LIMITED_MOVI1_3N,
 };
 
-struct mnh_ddr_data {
-	struct platform_device *pdev;
-	struct mnh_ddr_internal_state _state;
-};
+/* mnh-ddr driver init called during mnh-sm probe */
+int mnh_ddr_platform_init(struct device *dev);
 
-int mnh_ddr_platform_init(struct platform_device *pdev,
-			  struct mnh_ddr_data *data);
-int mnh_ddr_po_init(struct mnh_ddr_data *data, struct gpio_desc *iso_n);
-int mnh_ddr_resume(struct mnh_ddr_data *data, struct gpio_desc *iso_n);
-int mnh_ddr_suspend(struct mnh_ddr_data *data, struct gpio_desc *iso_n);
-int mnh_ddr_clr_int_status(struct device *dev);
-u64 mnh_ddr_int_status(struct device *dev);
-u32 mnh_ddr_mbist(struct mnh_ddr_data *data, enum mnh_ddr_bist_type bist_type);
+int mnh_ddr_po_init(struct device *dev, struct gpio_desc *iso_n);
+int mnh_ddr_resume(struct device *dev);
+int mnh_ddr_suspend(struct device *dev);
+int mnh_ddr_clr_int_status(void);
+u64 mnh_ddr_int_status(void);
+u32 mnh_ddr_mbist(struct device *dev, enum mnh_ddr_bist_type bist_type);
+int mnh_ddr_sw_switch(int index);
 
 #endif /* __MNH_DDR_H__ */

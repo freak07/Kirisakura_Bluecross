@@ -128,8 +128,7 @@ free_mem:
 		dma_free_writecombine(dev, len, info->cpu_addr, info->handle);
 	else
 		dma_free_attrs(dev, len, info->cpu_addr, info->handle,
-			DMA_ATTR_FORCE_COHERENT);
-
+			       DMA_ATTR_FORCE_COHERENT);
 err:
 	kfree(info);
 	return ION_CMA_ALLOCATE_FAILED;

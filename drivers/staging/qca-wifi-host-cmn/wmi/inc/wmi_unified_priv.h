@@ -180,14 +180,6 @@ struct wmi_wq_dbg_info {
 	qdf_thread_t *task;
 };
 
-struct wmi_rx_history_type {
-	uint32_t id;
-	wmi_buf_t evt_buf;
-	uint64_t timestamp;
-};
-
-#define WMI_RX_HISTORY_MAX 1024
-
 struct wmi_ops {
 QDF_STATUS (*send_vdev_create_cmd)(wmi_unified_t wmi_handle,
 				 uint8_t macaddr[IEEE80211_ADDR_LEN],

@@ -85,9 +85,6 @@ typedef PREPACK struct {
 /* end of copy wmi.h */
 #endif /* CONFIG_WIN */
 
-struct wmi_rx_history_type wmi_rx_history[WMI_RX_HISTORY_MAX];
-uint16_t wmi_rx_hist_last_idx = 0;
-
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 3, 0))
 /* TODO Cleanup this backported function */
 static int qcacld_bp_seq_printf(struct seq_file *m, const char *f, ...)
@@ -1714,7 +1711,6 @@ void __wmi_control_rx(struct wmi_unified *wmi_handle, wmi_buf_t evt_buf)
 	int tlv_ok_status = 0;
 #endif
 	uint32_t idx = 0;
-	static uint16_t wmi_rx_hist_idx = 0;
 
 	id = WMI_GET_FIELD(qdf_nbuf_data(evt_buf), WMI_CMD_HDR, COMMANDID);
 
@@ -1723,14 +1719,6 @@ void __wmi_control_rx(struct wmi_unified *wmi_handle, wmi_buf_t evt_buf)
 
 	data = qdf_nbuf_data(evt_buf);
 	len = qdf_nbuf_len(evt_buf);
-
-	wmi_rx_history[wmi_rx_hist_idx].timestamp = qdf_get_log_timestamp();
-	wmi_rx_history[wmi_rx_hist_idx].evt_buf = evt_buf;
-	wmi_rx_history[wmi_rx_hist_idx].id = id;
-	wmi_rx_hist_last_idx = wmi_rx_hist_idx;
-
-	if (++wmi_rx_hist_idx == WMI_RX_HISTORY_MAX)
-		wmi_rx_hist_idx = 0;
 
 #ifndef WMI_NON_TLV_SUPPORT
 	if (wmi_handle->target_type == WMI_TLV_TARGET) {

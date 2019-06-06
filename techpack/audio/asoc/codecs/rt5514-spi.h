@@ -14,9 +14,10 @@
 
 /**
  * RT5514_SPI_BUF_LEN is the buffer size of SPI master controller.
+ * the value should be mulitple of 8
  */
 #define RT5514_SPI_BUF_LEN		240
-#define WAKEUP_TIMEOUT			10000
+#define WAKEUP_TIMEOUT			5000
 
 #define RT5514_BUFFER_VOICE_BASE	0x18000200
 #define RT5514_BUFFER_VOICE_LIMIT	0x18000204
@@ -27,6 +28,7 @@
 #define RT5514_BUFFER_MUSIC_LIMIT	0x18001040
 #define RT5514_BUFFER_MUSIC_WP		0x18001044
 #define RT5514_BUFFER_ADDR_RANGE	0x4ff00000
+#define RT5514_DSP_FUNCTION		0x18002fac
 
 /* SPI Command */
 enum {
@@ -42,6 +44,12 @@ enum {
 	RT5514_DSP_NO_STREAM,
 	RT5514_DSP_STREAM_HOTWORD,
 	RT5514_DSP_STREAM_MUSDET,
+};
+
+enum {
+	RT5514_DSP_BOTH,
+	RT5514_DSP_HOTWORD,
+	RT5514_DSP_MUSDET,
 };
 
 extern unsigned int rt5514_stream_flag;

@@ -33,6 +33,15 @@
 #include "wcd-mbhc-adc.h"
 #include "wcd-mbhc-v2-api.h"
 
+static struct notifier rt5514_notifier;
+int wcd_register_callback(struct snd_soc_codec *codec, void *callback)
+{
+	pr_info("%s: enter\n", __func__);
+	rt5514_notifier.codec = codec;
+	rt5514_notifier.cb_func = callback;
+	return 0;
+}
+
 void wcd_mbhc_jack_report(struct wcd_mbhc *mbhc,
 			  struct snd_soc_jack *jack, int status, int mask)
 {
@@ -125,15 +134,17 @@ void wcd_enable_curr_micbias(const struct wcd_mbhc *mbhc,
 	if (mbhc->mbhc_cb->mbhc_micbias_control)
 		return;
 
-	pr_debug("%s: enter, cs_mb_en: %d\n", __func__, cs_mb_en);
+	pr_info("%s: enter, cs_mb_en: %d\n", __func__, cs_mb_en);
 
 	switch (cs_mb_en) {
 	case WCD_MBHC_EN_CS:
+#ifndef CONFIG_MBHC_CS_DISABLE
 		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_MICB_CTRL, 0);
 		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_BTN_ISRC_CTL, 3);
 		/* Program Button threshold registers as per CS */
 		wcd_program_btn_threshold(mbhc, false);
 		break;
+#endif
 	case WCD_MBHC_EN_MB:
 		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_BTN_ISRC_CTL, 0);
 		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_FSM_EN, 1);
@@ -533,12 +544,12 @@ void wcd_mbhc_hs_elec_irq(struct wcd_mbhc *mbhc, int irq_type,
 	else if (irq_type == WCD_MBHC_ELEC_HS_REM)
 		irq = mbhc->intr_ids->mbhc_hs_rem_intr;
 	else {
-		pr_debug("%s: irq_type: %d, enable: %d\n",
+		pr_info("%s: irq_type: %d, enable: %d\n",
 			__func__, irq_type, enable);
 		return;
 	}
 
-	pr_debug("%s: irq: %d, enable: %d, intr_status:%lu\n",
+	pr_info("%s: irq: %d, enable: %d, intr_status:%lu\n",
 		 __func__, irq, enable, mbhc->intr_status);
 	if ((test_bit(irq_type, &mbhc->intr_status)) != enable) {
 		mbhc->mbhc_cb->irq_control(mbhc->codec, irq, enable);
@@ -580,6 +591,11 @@ void wcd_mbhc_report_plug(struct wcd_mbhc *mbhc, int insertion,
 		}
 
 		if (mbhc->micbias_enable) {
+			if (rt5514_notifier.cb_func)
+				rt5514_notifier.cb_func(rt5514_notifier.codec,
+						RT5514_SWITCH_MIC1);
+			if (mbhc->mbhc_cb->switch_mic_mb)
+				mbhc->mbhc_cb->switch_mic_mb(codec, RT5514_SWITCH_MIC1);
 			if (mbhc->mbhc_cb->mbhc_micbias_control)
 				mbhc->mbhc_cb->mbhc_micbias_control(
 						codec, MIC_BIAS_2,
@@ -718,6 +734,20 @@ void wcd_mbhc_report_plug(struct wcd_mbhc *mbhc, int insertion,
 		}
 
 		mbhc->hph_status |= jack_type;
+
+		if (mbhc->micbias_enable) {
+			if (rt5514_notifier.cb_func)
+				rt5514_notifier.cb_func(rt5514_notifier.codec,
+						RT5514_SWITCH_MIC2);
+			if (mbhc->mbhc_cb->switch_mic_mb)
+				mbhc->mbhc_cb->switch_mic_mb(codec, RT5514_SWITCH_MIC2);
+		} else {
+			if (rt5514_notifier.cb_func)
+				rt5514_notifier.cb_func(rt5514_notifier.codec,
+						RT5514_SWITCH_MIC1);
+			if (mbhc->mbhc_cb->switch_mic_mb)
+				mbhc->mbhc_cb->switch_mic_mb(codec, RT5514_SWITCH_MIC1);
+		}
 
 		pr_info("%s: Reporting insertion %d(%x)\n", __func__,
 			 jack_type, mbhc->hph_status);
@@ -968,6 +998,11 @@ static void wcd_mbhc_swch_irq_handler(struct wcd_mbhc *mbhc)
 		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_FSM_EN, 0);
 		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_BTN_ISRC_CTL, 0);
 		mbhc->extn_cable_hph_rem = false;
+		if (rt5514_notifier.cb_func)
+			rt5514_notifier.cb_func(rt5514_notifier.codec,
+					RT5514_SWITCH_MIC1);
+		if (mbhc->mbhc_cb->switch_mic_mb)
+			mbhc->mbhc_cb->switch_mic_mb(codec, RT5514_SWITCH_MIC1);
 	}
 
 	mbhc->in_swch_irq_handler = false;
@@ -1020,10 +1055,13 @@ int wcd_mbhc_get_button_mask(struct wcd_mbhc *mbhc)
 		mask = SND_JACK_BTN_5;
 		break;
 	default:
+		pr_info("%s: btn %d no matching mask", __func__, btn);
 		break;
 	}
-	pr_info("%s: btn %d, key_code %d, mask 0x%x\n", __func__,
-		btn, mbhc->mbhc_cfg->key_code[btn], mask);
+	if (btn >= 0 && btn < WCD_MBHC_KEYCODE_NUM) {
+		pr_info("%s: btn %d, key_code %d, mask 0x%x\n", __func__,
+			btn, mbhc->mbhc_cfg->key_code[btn], mask);
+	}
 	return mask;
 }
 EXPORT_SYMBOL(wcd_mbhc_get_button_mask);

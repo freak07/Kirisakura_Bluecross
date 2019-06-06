@@ -97,6 +97,7 @@ static int q6lsm_memory_map_regions(struct lsm_client *client,
 				    uint32_t *mmap_p);
 static int q6lsm_memory_unmap_regions(struct lsm_client *client,
 				      uint32_t handle);
+static struct lsm_client *q6lsm_get_lsm_client(int session_id);
 
 static void q6lsm_set_param_hdr_info(
 		struct lsm_set_params_hdr *param_hdr,
@@ -144,6 +145,12 @@ static int q6lsm_callback(struct apr_client_data *data, void *priv)
 	}
 
 	if (data->opcode == RESET_EVENTS) {
+		if (!q6lsm_get_lsm_client(client->session)) {
+			pr_info("%s: Session %d not exist or already freed\n",
+				__func__, client->session);
+			return 0;
+		}
+
 		pr_debug("%s: SSR event received 0x%x, event 0x%x, proc 0x%x\n",
 			 __func__, data->opcode, data->reset_event,
 			 data->reset_proc);

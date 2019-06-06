@@ -1244,7 +1244,15 @@ static int cs35l36_handle_of_data(struct i2c_client *i2c_client,
 			return -EINVAL;
 		}
 
-		pdata->bst_ipk = (val - 1600) / 50;
+		// see SPEC 7.11.3 BST_IPK_CTL
+		// The transformation between reg value to current:
+		// bst_ipk    current
+		// 16         1.60 A
+		// 17         1.65 A
+		// ...
+		// 74         4.50 A
+		// The reg value must have an offset 16 for the minimum
+		pdata->bst_ipk = (val - 1600) / 50 + 16;
 	}
 
 	pdata->multi_amp_mode = of_property_read_bool(np,

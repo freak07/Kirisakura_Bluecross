@@ -39,6 +39,8 @@
 #include <dsp/audio_cal_utils.h>
 #include <dsp/q6asm-v2.h>
 #include <dsp/q6audio-v2.h>
+#include <dsp/q6core.h>
+#include <soc/qcom/subsystem_restart.h>
 #include "adsp_err.h"
 
 #define TRUE        0x01
@@ -1359,6 +1361,10 @@ err:
 	return NULL;
 }
 
+#define RESTART_MIN_PERIOD_SECONDS 60
+static struct timespec last_ssr;
+static bool ssr_success;
+
 int q6asm_audio_client_buf_alloc(unsigned int dir,
 			struct audio_client *ac,
 			unsigned int bufsz,
@@ -1438,8 +1444,39 @@ int q6asm_audio_client_buf_alloc(unsigned int dir,
 		mutex_unlock(&ac->cmd_lock);
 		rc = q6asm_memory_map_regions(ac, dir, bufsz, cnt, 0);
 		if (rc < 0) {
+			struct timespec this_ssr;
+
 			pr_err("%s: CMD Memory_map_regions failed %d for size %d\n",
 				__func__, rc, bufsz);
+
+			// Only trigger SSR if apr timedout
+			if (rc != -ETIMEDOUT)
+				goto fail;
+
+			/*
+			  For some cases that ADSP got failed
+			  for unknown reasons, it might keep showing
+			  error msg from q6asm_memory_map_regions and
+			  all audio functions seem not to work anymore
+			  until the next boot. Therefore, to add some
+			  check logic for triggering SSR if necessary.
+			*/
+			getnstimeofday(&this_ssr);
+			if (this_ssr.tv_sec - last_ssr.tv_sec >
+				RESTART_MIN_PERIOD_SECONDS) {
+				getnstimeofday(&last_ssr);
+				pr_info("%s: try to trigger SSR to recover.\n",
+					__func__);
+				ssr_success = false;
+				q6core_adsp_crash();
+				if (!ssr_success) {
+					pr_info("%s: q6core_adsp_crash"
+						" failed, restart"
+						" subsystem.\n", __func__);
+					subsystem_restart("adsp");
+				}
+			}
+
 			goto fail;
 		}
 	}
@@ -1542,8 +1579,39 @@ int q6asm_audio_client_buf_alloc_contiguous(unsigned int dir,
 	mutex_unlock(&ac->cmd_lock);
 	rc = q6asm_memory_map_regions(ac, dir, bufsz, cnt, 1);
 	if (rc < 0) {
+		struct timespec this_ssr;
+
 		pr_err("%s: CMD Memory_map_regions failed %d for size %d\n",
 			__func__, rc, bufsz);
+
+		// Only trigger SSR if apr timedout
+		if (rc != -ETIMEDOUT)
+			goto fail;
+
+		/*
+		  For some cases that ADSP got failed
+		  for unknown reasons, it might keep showing
+		  error msg from q6asm_memory_map_regions and
+		  all audio functions seem not to work anymore
+		  until the next boot. Therefore, to add some
+		  check logic for triggering SSR if necessary.
+		*/
+		getnstimeofday(&this_ssr);
+		if (this_ssr.tv_sec - last_ssr.tv_sec >
+			RESTART_MIN_PERIOD_SECONDS) {
+			getnstimeofday(&last_ssr);
+			pr_info("%s: try to trigger SSR to recover.\n",
+				__func__);
+			ssr_success = false;
+			q6core_adsp_crash();
+			if (!ssr_success) {
+				pr_info("%s: q6core_adsp_crash"
+					" failed, restart"
+					" subsystem.\n", __func__);
+				subsystem_restart("adsp");
+			}
+		}
+
 		goto fail;
 	}
 	return 0;
@@ -1576,6 +1644,7 @@ static int32_t q6asm_srvc_callback(struct apr_client_data *data, void *priv)
 	payload = data->payload;
 
 	if (data->opcode == RESET_EVENTS) {
+		ssr_success = true;
 		pr_debug("%s: Reset event is received: %d %d apr[%pK]\n",
 				__func__,
 				data->reset_event,
@@ -9819,6 +9888,9 @@ static int __init q6asm_init(void)
 
 	memset(session, 0, sizeof(struct audio_session) *
 		(ASM_ACTIVE_STREAMS_ALLOWED + 1));
+	memset(&last_ssr, 0, sizeof(struct timespec));
+	ssr_success = false;
+
 	for (lcnt = 0; lcnt <= ASM_ACTIVE_STREAMS_ALLOWED; lcnt++) {
 		spin_lock_init(&(session[lcnt].session_lock));
 		mutex_init(&(session[lcnt].mutex_lock_per_session));

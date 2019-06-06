@@ -138,7 +138,7 @@ do {                                                    \
 				  SND_JACK_BTN_2 | SND_JACK_BTN_3 | \
 				  SND_JACK_BTN_4 | SND_JACK_BTN_5)
 #define OCP_ATTEMPT 20
-#define HS_DETECT_PLUG_TIME_MS (3 * 1000)
+#define HS_DETECT_PLUG_TIME_MS (1 * 1000)
 #define SPECIAL_HS_DETECT_TIME_MS (2 * 1000)
 #define MBHC_BUTTON_PRESS_THRESHOLD_MIN 250
 #define GND_MIC_SWAP_THRESHOLD 4
@@ -407,6 +407,17 @@ enum mbhc_moisture_rref {
 	R_184_KOHM,
 };
 
+enum rt5514_mic_switch {
+	RT5514_SWITCH_NONE,
+	RT5514_SWITCH_MIC1,
+	RT5514_SWITCH_MIC2,
+};
+
+struct notifier {
+	struct snd_soc_codec *codec;
+	int (*cb_func)(struct snd_soc_codec *, int);
+};
+
 struct usbc_ana_audio_config {
 	int usbc_en1_gpio;
 	int usbc_en2_gpio;
@@ -496,6 +507,7 @@ struct wcd_mbhc_cb {
 	void (*update_anc_state)(struct snd_soc_codec *codec,
 				 bool enable, int anc_num);
 	bool (*is_anc_on)(struct wcd_mbhc *mbhc);
+	bool (*switch_mic_mb)(struct snd_soc_codec *codec, int mic);
 };
 
 struct wcd_mbhc_fn {
@@ -608,5 +620,6 @@ int wcd_cancel_btn_work(struct wcd_mbhc *mbhc);
 int wcd_mbhc_get_button_mask(struct wcd_mbhc *mbhc);
 void wcd_mbhc_report_plug(struct wcd_mbhc *mbhc, int insertion,
 			enum snd_jack_types jack_type);
+int wcd_register_callback(struct snd_soc_codec *codec, void *callback);
 
 #endif /* __WCD_MBHC_V2_H__ */

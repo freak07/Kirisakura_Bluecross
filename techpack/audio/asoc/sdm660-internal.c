@@ -467,6 +467,8 @@ static const struct snd_soc_dapm_widget msm_int_dapm_widgets[] = {
 	SND_SOC_DAPM_MIC("Digital Mic2", msm_dmic_event),
 	SND_SOC_DAPM_MIC("Digital Mic3", msm_dmic_event),
 	SND_SOC_DAPM_MIC("Digital Mic4", msm_dmic_event),
+	SND_SOC_DAPM_MIC("SoundTrigger Mic1", NULL),
+	SND_SOC_DAPM_MIC("SoundTrigger Mic2", NULL),
 
 	SND_SOC_DAPM_SUPPLY("Mic2_3 REGULATOR", SND_SOC_NOPM, 0, 0,
 	msm_int_audio_mic2_3_event,
@@ -1502,8 +1504,8 @@ static void *def_msm_int_wcd_mbhc_cal(void)
 	btn_high[2] = (u16)237.5;
 	btn_low[3] = (u16)437.5;
 	btn_high[3] = (u16)437.5;
-	btn_low[4] = 500;
-	btn_high[4] = 500;
+	btn_low[4] = (u16)437.5;
+	btn_high[4] = (u16)437.5;
 
 	return msm_int_wcd_cal;
 }
@@ -1516,6 +1518,8 @@ static int msm_audrx_init(struct snd_soc_pcm_runtime *rtd)
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
 	struct msm_asoc_mach_data *pdata = snd_soc_card_get_drvdata(rtd->card);
 	struct snd_card *card;
+	struct sdm660_cdc_priv *priv = snd_soc_codec_get_drvdata(ana_cdc);
+	struct wcd_mbhc *mbhc;
 	int ret = -ENOMEM;
 
 	pr_debug("%s(),dev_name%s\n", __func__, dev_name(cpu_dai->dev));
@@ -1550,6 +1554,9 @@ static int msm_audrx_init(struct snd_soc_pcm_runtime *rtd)
 	snd_soc_dapm_ignore_suspend(dapm, "AMIC1");
 	snd_soc_dapm_ignore_suspend(dapm, "AMIC2");
 	snd_soc_dapm_ignore_suspend(dapm, "AMIC3");
+
+	snd_soc_dapm_ignore_suspend(dapm, "SoundTrigger Mic1");
+	snd_soc_dapm_ignore_suspend(dapm, "SoundTrigger Mic2");
 	snd_soc_dapm_sync(dapm);
 
 	dapm = snd_soc_codec_get_dapm(dig_cdc);
@@ -1559,6 +1566,10 @@ static int msm_audrx_init(struct snd_soc_pcm_runtime *rtd)
 	snd_soc_dapm_ignore_suspend(dapm, "DMIC4");
 
 	snd_soc_dapm_sync(dapm);
+
+	mbhc = &priv->mbhc;
+	if (mbhc->mbhc_cb->switch_mic_mb)
+		mbhc->mbhc_cb->switch_mic_mb(ana_cdc, RT5514_SWITCH_MIC1);
 
 	msm_anlg_cdc_spk_ext_pa_cb(enable_spk_ext_pa, ana_cdc);
 	msm_dig_cdc_hph_comp_cb(msm_config_hph_compander_gpio, dig_cdc);
@@ -2803,6 +2814,7 @@ static struct snd_soc_dai_link msm_int_be_dai[] = {
 		.be_hw_params_fixup = int_mi2s_be_hw_params_fixup,
 		.ops = &msm_int_mi2s_be_ops,
 		.ignore_suspend = 1,
+		.ignore_pmdown_time = 1,
 	},
 	{
 		.name = LPASS_BE_INT3_MI2S_TX,

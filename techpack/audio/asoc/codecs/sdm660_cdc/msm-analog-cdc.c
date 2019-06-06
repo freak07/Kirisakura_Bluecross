@@ -199,6 +199,7 @@ static void msm_anlg_cdc_set_auto_zeroing(struct snd_soc_codec *codec,
 static void msm_anlg_cdc_configure_cap(struct snd_soc_codec *codec,
 				       bool micbias1, bool micbias2);
 static bool msm_anlg_cdc_use_mb(struct snd_soc_codec *codec);
+static bool msm_anlg_cdc_switch_mic_mb(struct snd_soc_codec *codec, int mic);
 
 static ssize_t codec_state_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
@@ -544,7 +545,7 @@ static void msm_anlg_cdc_mbhc_common_micb_ctrl(struct snd_soc_codec *codec,
 	u16 reg;
 	u8 mask;
 	u8 val;
-
+	pr_info("%s: event=%d, enable=%d\n", __func__, event, enable);
 	switch (event) {
 	case MBHC_COMMON_MICB_PRECHARGE:
 		reg = MSM89XX_PMIC_ANALOG_MICB_1_CTL;
@@ -945,6 +946,7 @@ static const struct wcd_mbhc_cb mbhc_cb = {
 	.hph_pa_on_status = msm_anlg_cdc_mbhc_hph_pa_on_status,
 	.set_btn_thr = msm_anlg_cdc_mbhc_program_btn_thr,
 	.extn_use_mb = msm_anlg_cdc_use_mb,
+	.switch_mic_mb = msm_anlg_cdc_switch_mic_mb,
 };
 
 static const uint32_t wcd_imped_val[] = {4, 8, 12, 13, 16,
@@ -2057,6 +2059,10 @@ static const char * const st_mic_bias_text[] = {
 	"ZERO", "ON"
 };
 
+static const char * const mic_bias_1_text[] = {
+	"ZERO", "RECORD", "SOUNDTRIGGER"
+};
+
 static const struct soc_enum adc2_enum =
 	SOC_ENUM_SINGLE(SND_SOC_NOPM, 0,
 		ARRAY_SIZE(adc2_mux_text), adc2_mux_text);
@@ -2073,7 +2079,9 @@ static const struct soc_enum st_mic_bias_enum =
 	SOC_ENUM_SINGLE(SND_SOC_NOPM, 0,
 		ARRAY_SIZE(st_mic_bias_text), st_mic_bias_text);
 
-
+static const struct soc_enum mic_bias_1_enum =
+	SOC_ENUM_SINGLE(SND_SOC_NOPM, 0,
+		ARRAY_SIZE(mic_bias_1_text), mic_bias_1_text);
 
 static const struct snd_kcontrol_new ext_spk_mux =
 	SOC_DAPM_ENUM("Ext Spk Switch Mux", ext_spk_enum);
@@ -2102,11 +2110,13 @@ static const struct snd_kcontrol_new wsa_spk_mux[] = {
 	SOC_DAPM_ENUM("WSA Spk Switch", wsa_spk_enum)
 };
 
-static const struct snd_kcontrol_new st_mic_bais_mux[] = {
+static const struct snd_kcontrol_new st_mic_bias_mux[] = {
 	SOC_DAPM_ENUM("SoundTrigger Switch", st_mic_bias_enum)
 };
 
-
+static const struct snd_kcontrol_new mic_bias_1_mux[] = {
+	SOC_DAPM_ENUM("MICBIAS1 Switch", mic_bias_1_enum)
+};
 
 static const char * const hph_text[] = {
 	"ZERO", "Switch",
@@ -2419,6 +2429,31 @@ static bool msm_anlg_cdc_use_mb(struct snd_soc_codec *codec)
 		return false;
 }
 
+static bool msm_anlg_cdc_switch_mic_mb(struct snd_soc_codec *codec, int mic)
+{
+	struct snd_soc_dapm_context *dapm = snd_soc_codec_get_dapm(codec);
+
+	pr_info("%s: enter mic = %d\n", __func__, mic);
+	switch (mic) {
+	case RT5514_SWITCH_MIC1:
+		snd_soc_dapm_enable_pin(dapm, "SoundTrigger Mic1");
+		snd_soc_dapm_disable_pin(dapm, "SoundTrigger Mic2");
+		break;
+	case RT5514_SWITCH_MIC2:
+		snd_soc_dapm_disable_pin(dapm, "SoundTrigger Mic1");
+		snd_soc_dapm_enable_pin(dapm, "SoundTrigger Mic2");
+		break;
+	case RT5514_SWITCH_NONE:
+		snd_soc_dapm_disable_pin(dapm, "SoundTrigger Mic1");
+		snd_soc_dapm_disable_pin(dapm, "SoundTrigger Mic2");
+		break;
+	}
+	if (snd_soc_dapm_sync(dapm))
+		pr_err("%s: dapm sync error\n", __func__);
+
+	return true;
+}
+
 static void msm_anlg_cdc_set_auto_zeroing(struct snd_soc_codec *codec,
 					  bool enable)
 {
@@ -2606,6 +2641,48 @@ static int msm_anlg_cdc_codec_enable_micbias(struct snd_soc_dapm_widget *w,
 		if (w->reg == MSM89XX_PMIC_ANALOG_MICB_1_EN)
 			msm_anlg_cdc_configure_cap(codec, false, micbias2);
 		break;
+	}
+	return 0;
+}
+
+static bool lower_micbias;
+static int msm_anlg_cdc_codec_micbias_control(struct snd_soc_dapm_widget *w,
+			  struct snd_kcontrol *kcontrol, int event)
+{
+	struct snd_soc_codec *codec = snd_soc_dapm_to_codec(w->dapm);
+	struct sdm660_cdc_priv *priv = snd_soc_codec_get_drvdata(codec);
+	struct wcd_mbhc *mbhc;
+
+	mbhc = &priv->mbhc;
+	pr_info("%s: event = %d micbias_enable = %d lower_micbias = %d\n",
+			__func__, event, mbhc->micbias_enable, lower_micbias);
+	switch (event) {
+	case SND_SOC_DAPM_PRE_PMU:
+		if (mbhc->mbhc_cb->set_micbias_value && mbhc->micbias_enable) {
+			mbhc->mbhc_cb->set_micbias_value(codec);
+			lower_micbias = true;
+		}
+		break;
+	case SND_SOC_DAPM_POST_PMD:
+		if (mbhc->mbhc_cb->mbhc_common_micb_ctrl &&
+			mbhc->micbias_enable &&
+			lower_micbias) {
+			mbhc->mbhc_cb->mbhc_common_micb_ctrl(codec,
+					MBHC_COMMON_MICB_PRECHARGE,
+					true);
+			mbhc->mbhc_cb->mbhc_common_micb_ctrl(codec,
+					MBHC_COMMON_MICB_SET_VAL,
+					true);
+			msleep(50);
+			mbhc->mbhc_cb->mbhc_common_micb_ctrl(codec,
+					MBHC_COMMON_MICB_PRECHARGE,
+					false);
+		}
+		lower_micbias = false;
+		break;
+	default:
+		pr_err("%s: invalid DAPM event %d\n", __func__, event);
+		return -EINVAL;
 	}
 	return 0;
 }
@@ -2821,6 +2898,11 @@ static int msm_anlg_cdc_hphl_dac_event(struct snd_soc_dapm_widget *w,
 
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
+		/*
+		* Add 2ms sleep to fix PA wrong state issue
+		* during back2back hph disable-enable
+		*/
+		usleep_range(2000, 2100);
 		if (get_codec_version(sdm660_cdc) > CAJON)
 			snd_soc_update_bits(codec,
 				MSM89XX_PMIC_ANALOG_RX_HPH_CNP_EN,
@@ -2934,6 +3016,11 @@ static int msm_anlg_cdc_hphr_dac_event(struct snd_soc_dapm_widget *w,
 
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
+		/*
+		* Add 2ms sleep to fix PA wrong state issue
+		* during back2back hph disable-enable
+		*/
+		usleep_range(2000, 2100);
 		if (sdm660_cdc->hph_mode == HD2_MODE)
 			msm_anlg_cdc_dig_notifier_call(codec,
 					DIG_CDC_EVENT_PRE_RX2_INT_ON);
@@ -3123,8 +3210,13 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"MIC BIAS Internal2", NULL, "MICBIAS_REGULATOR"},
 	{"MIC BIAS External", NULL, "MICBIAS_REGULATOR"},
 	{"MIC BIAS External2", NULL, "MICBIAS_REGULATOR"},
+	{"MIC1_REC BIAS", NULL, "MIC1_REC SUPPLY"},
 
+	{"MICBIAS1 Switch", "RECORD", "MIC1_REC BIAS"},
+	{"MICBIAS1 Switch", "SOUNDTRIGGER", "MIC1_ST BIAS"},
+	{"MIC BIAS Internal1", NULL, "MICBIAS1 Switch"},
 	{"SoundTrigger Switch", "ON", "MIC BIAS Internal1"},
+	{"SoundTrigger Switch", "ON", "MIC2_3 BIAS"},
 };
 
 static int msm_anlg_cdc_startup(struct snd_pcm_substream *substream,
@@ -3433,7 +3525,9 @@ static const struct snd_soc_dapm_widget msm_anlg_cdc_dapm_widgets[] = {
 	SND_SOC_DAPM_MUX("LINE_OUT", SND_SOC_NOPM, 0, 0, lo_mux),
 	SND_SOC_DAPM_MUX("ADC2 MUX", SND_SOC_NOPM, 0, 0, &tx_adc2_mux),
 	SND_SOC_DAPM_MUX("SoundTrigger Switch", SND_SOC_NOPM, 0, 0,
-			st_mic_bais_mux),
+			st_mic_bias_mux),
+	SND_SOC_DAPM_MUX("MICBIAS1 Switch", SND_SOC_NOPM, 0, 0,
+			mic_bias_1_mux),
 
 	SND_SOC_DAPM_MIXER_E("HPHL DAC",
 		MSM89XX_PMIC_ANALOG_RX_HPH_L_PA_DAC_CTL, 3, 0, NULL,
@@ -3523,6 +3617,13 @@ static const struct snd_soc_dapm_widget msm_anlg_cdc_dapm_widgets[] = {
 		MSM89XX_PMIC_ANALOG_MICB_2_EN, 7, 0,
 		msm_anlg_cdc_codec_enable_micbias, SND_SOC_DAPM_POST_PMU |
 		SND_SOC_DAPM_POST_PMD),
+	SND_SOC_DAPM_SUPPLY("MIC1_REC SUPPLY",
+		SND_SOC_NOPM, 0, 0,
+		msm_anlg_cdc_codec_micbias_control, SND_SOC_DAPM_PRE_PMU |
+		SND_SOC_DAPM_POST_PMD),
+	SND_SOC_DAPM_MICBIAS("MIC1_REC BIAS", SND_SOC_NOPM, 0, 0),
+	SND_SOC_DAPM_MICBIAS("MIC1_ST BIAS", SND_SOC_NOPM, 0, 0),
+	SND_SOC_DAPM_MICBIAS("MIC2_3 BIAS", SND_SOC_NOPM, 0, 0),
 
 	SND_SOC_DAPM_INPUT("AMIC1"),
 	SND_SOC_DAPM_INPUT("AMIC2"),
@@ -3955,7 +4056,7 @@ static void msm_anlg_cdc_set_micb_v(struct snd_soc_codec *codec)
 
 	reg_val = VOLTAGE_CONVERTER(pdata->micbias.cfilt1_mv, MICBIAS_MIN_VAL,
 			MICBIAS_STEP_SIZE);
-	dev_dbg(codec->dev, "cfilt1_mv %d reg_val %x\n",
+	dev_info(codec->dev, "cfilt1_mv %d reg_val %x\n",
 			(u32)pdata->micbias.cfilt1_mv, reg_val);
 	snd_soc_update_bits(codec, MSM89XX_PMIC_ANALOG_MICB_1_VAL,
 			0xF8, (reg_val << 3));
@@ -4654,6 +4755,7 @@ static int msm_anlg_cdc_probe(struct platform_device *pdev)
 				     &soc_codec_dev_sdm660_cdc,
 				     msm_anlg_cdc_i2s_dai,
 				     ARRAY_SIZE(msm_anlg_cdc_i2s_dai));
+	lower_micbias = false;
 	if (ret) {
 		dev_err(&pdev->dev,
 			"%s:snd_soc_register_codec failed with error %d\n",

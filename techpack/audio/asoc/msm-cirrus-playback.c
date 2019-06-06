@@ -178,7 +178,7 @@ static int crus_afe_get_param(int port, int module, int param, int length,
 	int index = afe_get_port_index(port);
 	int ret = 0, count = 0;
 
-	pr_info("%s: port = %d module = %d param = 0x%x length = %d\n",
+	pr_debug("%s: port = %d module = %d param = 0x%x length = %d\n",
 		__func__, port, module, param, length);
 
 	if (!msm_crus_is_cirrus_afe_topology()) {
@@ -193,7 +193,7 @@ static int crus_afe_get_param(int port, int module, int param, int length,
 		return -ENOMEM;
 	}
 
-	pr_info("%s: Preparing to send apr packet\n", __func__);
+	pr_debug("%s: Preparing to send apr packet\n", __func__);
 
 	mutex_lock(&crus_sp_get_param_lock);
 	atomic_set(&crus_sp_get_param_flag, 0);
@@ -213,7 +213,7 @@ static int crus_afe_get_param(int port, int module, int param, int length,
 		pr_err("%s: crus get_param for port %d failed with code %d\n",
 						__func__, port, ret);
 	else
-		pr_info("%s: crus get_param sent packet with param id 0x%08x "
+		pr_debug("%s: crus get_param sent packet with param id 0x%08x "
 			"to module 0x%08x.\n", __func__, param, module);
 
 	/* Wait for afe callback to populate data */
@@ -575,6 +575,10 @@ int msm_routing_cirrus_fbport_put(struct snd_kcontrol *kcontrol,
 	case 4:
 		cirrus_fb_port = AFE_PORT_ID_QUATERNARY_TDM_TX;
 		cirrus_ff_port = AFE_PORT_ID_QUATERNARY_TDM_RX;
+		break;
+	case 5:
+		cirrus_fb_port = AFE_PORT_ID_SECONDARY_TDM_TX;
+		cirrus_ff_port = AFE_PORT_ID_SECONDARY_TDM_RX;
 		break;
 	default:
 		/* Default port to QUATERNARY */
@@ -969,7 +973,7 @@ static int msm_routing_crus_fail_det_get(struct snd_kcontrol *kcontrol,
 
 static const char *cirrus_fb_port_text[] = {"PRI_MI2S_RX", "SEC_MI2S_RX",
 					    "TERT_MI2S_RX", "QUAT_MI2S_RX",
-					    "QUAT_TDM_RX_0"};
+					    "QUAT_TDM_RX_0", "SEC_TDM_RX_0"};
 
 static const char *crus_en_text[] = {"Config SP Disable", "Config SP Enable"};
 
@@ -980,7 +984,7 @@ static const char *crus_delta_text[] = {"Idle", "Load", "Run"};
 static const char *crus_chan_swap_text[] = {"LR", "RL"};
 
 static const struct soc_enum cirrus_fb_controls_enum[] = {
-	SOC_ENUM_SINGLE_EXT(5, cirrus_fb_port_text),
+	SOC_ENUM_SINGLE_EXT(6, cirrus_fb_port_text),
 };
 
 static const struct soc_enum crus_en_enum[] = {
@@ -1102,6 +1106,7 @@ static void msm_crus_check_calibration_value(void)
 int msm_crus_store_imped(char channel)
 {
 	/* cs35l36 speaker amp constant value */
+	const int scale_factor = 100000000;
 	const int amp_factor = 71498;
 	int32_t buffer[96] = {0};
 	int out_cal0;
@@ -1123,8 +1128,9 @@ int msm_crus_store_imped(char channel)
 
 		crus_spk.imp_l =  buffer[3] * amp_factor;
 
-		pr_debug("%s: left impedance %d", __func__,
-				crus_spk.imp_l);
+		pr_info("%s: left impedance %d.%d ohms", __func__,
+				crus_spk.imp_l / scale_factor,
+				crus_spk.imp_l % scale_factor);
 
 	} else if (channel == 'r') {
 		out_cal0 = buffer[14];
@@ -1135,8 +1141,9 @@ int msm_crus_store_imped(char channel)
 
 		crus_spk.imp_r = buffer[1] * amp_factor;
 
-		pr_debug("%s: right impedance %d", __func__,
-				crus_spk.imp_r);
+		pr_info("%s: right impedance %d.%d ohms", __func__,
+				crus_spk.imp_r / scale_factor,
+				crus_spk.imp_r % scale_factor);
 
 	} else
 		pr_err("%s: unknown channel", __func__);

@@ -779,25 +779,29 @@ exit:
 								MIC_BIAS_2);
 	}
 
+#ifndef CONFIG_SND_SOC_RT5514
 	if (mbhc->mbhc_cfg->detect_extn_cable &&
 	    ((plug_type == MBHC_PLUG_TYPE_HEADPHONE) ||
 	     (plug_type == MBHC_PLUG_TYPE_HEADSET)) &&
-	    !mbhc->hs_detect_work_stop &&
-	    !mbhc->micbias_enable) {
+	    !mbhc->hs_detect_work_stop) {
 		WCD_MBHC_RSC_LOCK(mbhc);
 		wcd_mbhc_hs_elec_irq(mbhc, WCD_MBHC_ELEC_HS_REM, true);
 		WCD_MBHC_RSC_UNLOCK(mbhc);
 	}
+#endif
 	if (mbhc->mbhc_cb->set_cap_mode)
 		mbhc->mbhc_cb->set_cap_mode(codec, micbias1, micbias2);
 
 	if (mbhc->mbhc_cb->hph_pull_down_ctrl)
 		mbhc->mbhc_cb->hph_pull_down_ctrl(codec, true);
 
-	if (mbhc->mbhc_cb->switch_mic_mb && mbhc->micbias_enable)
+#ifdef CONFIG_SND_SOC_RT5514
+	if (mbhc->mbhc_cb->switch_mic_mb &&
+	    mbhc->current_plug != MBHC_PLUG_TYPE_NONE)
 		mbhc->mbhc_cb->switch_mic_mb(codec, RT5514_SWITCH_MIC2);
-	else if (mbhc->mbhc_cb->switch_mic_mb && !mbhc->micbias_enable)
+	else
 		mbhc->mbhc_cb->switch_mic_mb(codec, RT5514_SWITCH_MIC1);
+#endif
 	mbhc->mbhc_cb->lock_sleep(mbhc, false);
 	pr_debug("%s: leave\n", __func__);
 }

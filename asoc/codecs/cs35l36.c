@@ -975,6 +975,57 @@ static int cs35l36_codec_probe(struct snd_soc_codec *codec)
 		regmap_update_bits(cs35l36->regmap, CS35L36_DTEMP_WARN_THLD,
 					CS35L36_TEMP_THLD_MASK,
 					cs35l36->pdata.temp_warn_thld);
+
+	if (cs35l36->pdata.vpbr_en)
+		regmap_update_bits(cs35l36->regmap, CS35L36_PWR_CTRL3,
+				CS35L36_VPBR_EN_MASK,
+				cs35l36->pdata.vpbr_en << CS35L36_VPBR_EN_SHIFT);
+
+	if (cs35l36->pdata.vpbr_thld1 >= 0)
+		regmap_update_bits(cs35l36->regmap, CS35L36_VPBR_CFG,
+				CS35L36_VPBR_THLD1_MASK,
+				cs35l36->pdata.vpbr_thld1 << CS35L36_VPBR_THLD1_SHIFT);
+
+	if (cs35l36->pdata.vpbr_max_att >= 0)
+		regmap_update_bits(cs35l36->regmap, CS35L36_VPBR_CFG,
+				CS35L36_VPBR_MAX_ATT_MASK,
+				cs35l36->pdata.vpbr_max_att << CS35L36_VPBR_MAX_ATT_SHIFT);
+
+	if (cs35l36->pdata.vpbr_atk_vol >= 0)
+		regmap_update_bits(cs35l36->regmap, CS35L36_VPBR_CFG,
+				CS35L36_VPBR_ATK_VOL_MASK,
+				cs35l36->pdata.vpbr_atk_vol << CS35L36_VPBR_ATK_VOL_SHIFT);
+
+	if (cs35l36->pdata.vpbr_atk_rate >= 0)
+		regmap_update_bits(cs35l36->regmap, CS35L36_VPBR_CFG,
+				CS35L36_VPBR_ATK_RATE_MASK,
+				cs35l36->pdata.vpbr_atk_rate << CS35L36_VPBR_ATK_RATE_SHIFT);
+
+	if (cs35l36->pdata.vpbr_wait >= 0)
+		regmap_update_bits(cs35l36->regmap, CS35L36_VPBR_CFG,
+				CS35L36_VPBR_WAIT_MASK,
+				cs35l36->pdata.vpbr_wait << CS35L36_VPBR_WAIT_SHIFT);
+
+	if (cs35l36->pdata.vpbr_rel_rate >= 0)
+		regmap_update_bits(cs35l36->regmap, CS35L36_VPBR_CFG,
+				CS35L36_VPBR_REL_RATE_MASK,
+				cs35l36->pdata.vpbr_rel_rate << CS35L36_VPBR_REL_RATE_SHIFT);
+
+	if (cs35l36->pdata.vpbr_mute_en)
+		regmap_update_bits(cs35l36->regmap, CS35L36_VPBR_CFG,
+				CS35L36_VPBR_MUTE_EN_MASK,
+				cs35l36->pdata.vpbr_mute_en << CS35L36_VPBR_MUTE_EN_SHIFT);
+
+	if (cs35l36->pdata.vpbr_rel_auto)
+		regmap_update_bits(cs35l36->regmap, CS35L36_VPBR_CFG,
+				CS35L36_VPBR_REL_AUTO_MASK,
+				cs35l36->pdata.vpbr_rel_auto << CS35L36_VPBR_REL_AUTO_SHIFT);
+
+	if (cs35l36->pdata.vpbr_rel_trig_high)
+		regmap_update_bits(cs35l36->regmap, CS35L36_VPBR_CFG,
+				CS35L36_VPBR_REL_TRIG_MASK,
+				cs35l36->pdata.vpbr_rel_trig_high << CS35L36_VPBR_REL_TRIG_SHIFT);
+
 	/*
 	 * Rev B0 has 2 versions
 	 * L36 is 10V
@@ -1279,6 +1330,48 @@ static int cs35l36_handle_of_data(struct i2c_client *i2c_client,
 
 	pdata->vmon_pol_inv = of_property_read_bool(np,
 					"cirrus,vmon-pol-inv");
+
+	pdata->vpbr_en = of_property_read_bool(np,
+					"cirrus,brownout-protection-enable");
+
+	if (of_property_read_u32(np, "cirrus,vpbr-thld1", &val) >= 0)
+		pdata->vpbr_thld1 = val;
+	else
+		pdata->vpbr_thld1 = -1;
+
+	if (of_property_read_u32(np, "cirrus,vpbr-max-att", &val) >= 0)
+		pdata->vpbr_max_att = val;
+	else
+		pdata->vpbr_max_att = -1;
+
+	if (of_property_read_u32(np, "cirrus,vpbr-atk-vol", &val) >= 0)
+		pdata->vpbr_atk_vol = val;
+	else
+		pdata->vpbr_atk_vol = -1;
+
+	if (of_property_read_u32(np, "cirrus,vpbr-atk-rate", &val) >= 0)
+		pdata->vpbr_atk_rate = val;
+	else
+		pdata->vpbr_atk_rate = -1;
+
+	if (of_property_read_u32(np, "cirrus,vpbr-wait", &val) >= 0)
+		pdata->vpbr_wait = val;
+	else
+		pdata->vpbr_wait = -1;
+
+	if (of_property_read_u32(np, "cirrus,vpbr-rel-rate", &val) >= 0)
+		pdata->vpbr_rel_rate = val;
+	else
+		pdata->vpbr_rel_rate = -1;
+
+	pdata->vpbr_mute_en = of_property_read_bool(np,
+					"cirrus,vpbr-mute-en");
+
+	pdata->vpbr_rel_auto = of_property_read_bool(np,
+					"cirrus,vpbr-rel-auto");
+
+	pdata->vpbr_rel_trig_high = of_property_read_bool(np,
+					"cirrus,vpbr-rel-trig-high");
 
 	if (of_property_read_u32(np, "cirrus,temp-warn-threshold", &val) >= 0)
 		pdata->temp_warn_thld = val | CS35L36_VALID_PDATA;

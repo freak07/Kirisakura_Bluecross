@@ -620,7 +620,7 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
 				int ret;
 
-				ret = rt5514_spi_burst_write(0x4ffab800,
+				ret = rt5514_spi_burst_write(0x4ffaa800,
 					rt5514->hotword_model_buf,
 					rt5514->hotword_model_len);
 				if (ret) {
@@ -638,7 +638,7 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 						 codec->dev);
 				if (fw) {
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
-					rt5514_spi_burst_write(0x4ffab800,
+					rt5514_spi_burst_write(0x4ffaa800,
 						fw->data, fw->size);
 #else
 					dev_err(codec->dev,
@@ -708,7 +708,7 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 				}
 
 				if (rt5514_fw_validate(rt5514, RT5514_FIRMWARE3,
-					0x4ffab800)) {
+					0x4ffaa800)) {
 					rt5514->dsp_enabled = 0;
 					regmap_multi_reg_write(
 						rt5514->i2c_regmap,

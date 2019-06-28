@@ -40,16 +40,6 @@ struct cs35l36_platform_data {
 	int bst_ipk;
 	bool extern_boost;
 	int temp_warn_thld;
-	bool vpbr_en;
-	int vpbr_thld1;
-	int vpbr_max_att;
-	int vpbr_atk_vol;
-	int vpbr_atk_rate;
-	int vpbr_wait;
-	int vpbr_rel_rate;
-	bool vpbr_mute_en;
-	bool vpbr_rel_auto;
-	bool vpbr_rel_trig_high;
 	struct irq_cfg irq_config;
 };
 

@@ -13,7 +13,7 @@ echo
 mkdir -p out
 export ARCH=arm64
 export SUBARCH=arm64
-export CLANG_PATH=~/Android_Build/Clang_Google/linux-x86/clang-r353983d/bin
+export CLANG_PATH=~/Android_Build/Clang_Google/linux-x86/clang-r353983e/bin
 export PATH=${CLANG_PATH}:${PATH}
 export CLANG_TRIPLE=aarch64-linux-gnu-
 export CROSS_COMPILE=~/Android_Build/GCC_Google_Arm64/aarch64-linux-android-4.9/bin/aarch64-linux-android-

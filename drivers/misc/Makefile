@@ -98,3 +98,5 @@ obj-$(CONFIG_OKL4_LINK_SHBUF)    += okl4-link-shbuf.o
 subdir-ccflags-y += \
 	-Wno-header-guard \
 	-Wno-ignored-attributes \
+
+obj-$(CONFIG_SYSTRACE) += systrace.o

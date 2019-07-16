@@ -322,13 +322,20 @@ int rt5514_event_notify(struct snd_soc_codec *codec, int mic)
 
 	pr_info("%s: notify mic = %d\n", __func__, mic);
 	mic_switch = mic;
+
+	if (!rt5514->dsp_enabled) {
+		pr_info("%s: dsp not enable\n", __func__);
+		return -EINVAL;
+	}
+
 	switch (mic_switch) {
 	case RT5514_SWITCH_MIC1:
 		regmap_write(rt5514->i2c_regmap, 0x180020a4, 0x00808002);
+		regmap_write(rt5514->i2c_regmap, 0x18002104, 0x14023641);
 		break;
 	case RT5514_SWITCH_MIC2:
 		regmap_write(rt5514->i2c_regmap, 0x180020a4, 0x00809002);
-		regmap_write(rt5514->i2c_regmap, 0x18002104, 0x34023541);
+		regmap_write(rt5514->i2c_regmap, 0x18002104, 0x24023641);
 		break;
 	default:
 		return -EINVAL;
@@ -1243,6 +1250,8 @@ static int rt5514_hw_free(struct snd_pcm_substream  *substream,
 	if (rt5514->dsp_enabled) {
 		regmap_write(rt5514->i2c_regmap, 0x18002fb0, 0);
 		regmap_write(rt5514->i2c_regmap, 0x18001014, 1);
+		msleep(20);
+		rt5514_event_notify(codec, mic_switch);
 		return 0;
 	}
 

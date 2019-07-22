@@ -14,7 +14,6 @@
 #include <linux/io.h>
 #include <linux/of_address.h>
 #include <linux/bldr_debug_tools.h>
-#include <linux/utsname.h>
 
 /*
  * These will be re-linked against their real values
@@ -75,9 +74,6 @@ struct kernel_info {
 	u64 page_offset;
 	u64 phys_offset;
 	u64 kimage_voffset;
-
-	/* For linux banner */
-	u8 last_uts_release[__NEW_UTS_LEN];
 } __packed;
 
 struct kernel_all_info {
@@ -153,8 +149,6 @@ static void backup_kernel_info(void)
 	info->page_offset = PAGE_OFFSET;
 	info->phys_offset = PHYS_OFFSET;
 	info->kimage_voffset = kimage_voffset;
-	strlcpy(info->last_uts_release, init_utsname()->release,
-			sizeof(info->last_uts_release));
 
 	checksum_info = (u32 *)info;
 	for (index = 0; index < sizeof(struct kernel_info)/sizeof(u32);

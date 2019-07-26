@@ -477,7 +477,8 @@ hdd_apf_read_memory_callback(void *hdd_context,
 	 */
 	pkt_offset = read_mem_evt->offset - context->offset;
 
-	if (context->buf_len < pkt_offset + read_mem_evt->length) {
+	if ((pkt_offset > context->buf_len) ||
+	    (context->buf_len - pkt_offset < read_mem_evt->length)) {
 		qdf_spin_unlock(&context->lock);
 		hdd_err("Read chunk exceeding allocated space");
 		return;

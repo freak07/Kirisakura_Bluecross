@@ -6013,6 +6013,8 @@ void lim_send_chan_switch_action_frame(tpAniSirGlobal mac_ctx,
 
 }
 
+#define MAX_WAKELOCK_FOR_CSA         5000
+
 /**
  * lim_process_sme_dfs_csa_ie_request() - process sme dfs csa ie req
  *
@@ -6137,7 +6139,9 @@ skip_vht:
 		pe_err("Unable to set CSA IE in beacon");
 		return;
 	}
-
+	qdf_wake_lock_timeout_acquire(&session_entry->ap_ecsa_wakelock,
+				      MAX_WAKELOCK_FOR_CSA);
+	qdf_runtime_pm_prevent_suspend(&session_entry->ap_ecsa_runtime_lock);
 	/*
 	 * First beacon update request is sent here, the remaining updates are
 	 * done when the FW responds back after sending the first beacon after

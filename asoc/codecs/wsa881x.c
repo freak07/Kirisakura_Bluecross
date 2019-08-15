@@ -383,14 +383,15 @@ static ssize_t wsa881x_swrslave_reg_show(char __user *ubuf, size_t count,
 	if (!ubuf || !ppos || (devnum == 0))
 		return 0;
 
+	memset(tmp_buf, 0, ARRAY_SIZE(tmp_buf));
 	for (i = (((int) *ppos / BYTES_PER_LINE) + SWR_SLV_START_REG_ADDR);
 		i <= SWR_SLV_MAX_REG_ADDR; i++) {
 		if (!is_swr_slv_reg_readable(i))
 			continue;
 		swr_read(dbgwsa881x->swr_slave, devnum,
 			i, &reg_val, 1);
-		len = snprintf(tmp_buf, 25, "0x%.3x: 0x%.2x\n", i,
-			       (reg_val & 0xFF));
+		len = scnprintf(tmp_buf, ARRAY_SIZE(tmp_buf),
+				"0x%.3x: 0x%.2x\n", i, (reg_val & 0xFF));
 		if ((total + len) >= count - 1)
 			break;
 		if (copy_to_user((ubuf + total), tmp_buf, len)) {

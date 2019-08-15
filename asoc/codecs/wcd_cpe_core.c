@@ -60,7 +60,7 @@
 	mutex_unlock(lock);			\
 }
 
-#define WCD_CPE_STATE_MAX_LEN 11
+#define WCD_CPE_STATE_MAX_LEN 16
 #define CPE_OFFLINE_WAIT_TIMEOUT (2 * HZ)
 #define CPE_READY_WAIT_TIMEOUT (3 * HZ)
 #define WCD_CPE_SYSFS_DIR_MAX_LENGTH 32
@@ -1907,8 +1907,6 @@ struct wcd_cpe_core *wcd_cpe_init(const char *img_fname,
 	struct snd_card *card = NULL;
 	struct snd_info_entry *entry = NULL;
 	char proc_name[WCD_CPE_STATE_MAX_LEN];
-	const char *cpe_name = "cpe";
-	const char *state_name = "_state";
 	const struct cpe_svc_hw_cfg *hw_info;
 	int id = 0;
 
@@ -1978,8 +1976,7 @@ struct wcd_cpe_core *wcd_cpe_init(const char *img_fname,
 	}
 
 	card = codec->component.card->snd_card;
-	snprintf(proc_name, (sizeof("cpe") + sizeof("_state") +
-		 sizeof(id) - 2), "%s%d%s", cpe_name, id, state_name);
+	snprintf(proc_name, ARRAY_SIZE(proc_name), "cpe%d_state", id);
 	entry = snd_info_create_card_entry(card, proc_name,
 					   card->proc_root);
 	if (entry) {

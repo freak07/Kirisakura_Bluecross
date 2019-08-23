@@ -322,13 +322,20 @@ int rt5514_event_notify(struct snd_soc_codec *codec, int mic)
 
 	pr_info("%s: notify mic = %d\n", __func__, mic);
 	mic_switch = mic;
+
+	if (!rt5514->dsp_enabled) {
+		pr_info("%s: dsp not enable\n", __func__);
+		return -EINVAL;
+	}
+
 	switch (mic_switch) {
 	case RT5514_SWITCH_MIC1:
 		regmap_write(rt5514->i2c_regmap, 0x180020a4, 0x00808002);
+		regmap_write(rt5514->i2c_regmap, 0x18002104, 0x14023641);
 		break;
 	case RT5514_SWITCH_MIC2:
 		regmap_write(rt5514->i2c_regmap, 0x180020a4, 0x00809002);
-		regmap_write(rt5514->i2c_regmap, 0x18002104, 0x34023541);
+		regmap_write(rt5514->i2c_regmap, 0x18002104, 0x24023641);
 		break;
 	default:
 		return -EINVAL;
@@ -620,7 +627,7 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
 				int ret;
 
-				ret = rt5514_spi_burst_write(0x4ffab800,
+				ret = rt5514_spi_burst_write(0x4ffaa800,
 					rt5514->hotword_model_buf,
 					rt5514->hotword_model_len);
 				if (ret) {
@@ -638,7 +645,7 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 						 codec->dev);
 				if (fw) {
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
-					rt5514_spi_burst_write(0x4ffab800,
+					rt5514_spi_burst_write(0x4ffaa800,
 						fw->data, fw->size);
 #else
 					dev_err(codec->dev,
@@ -708,7 +715,7 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 				}
 
 				if (rt5514_fw_validate(rt5514, RT5514_FIRMWARE3,
-					0x4ffab800)) {
+					0x4ffaa800)) {
 					rt5514->dsp_enabled = 0;
 					regmap_multi_reg_write(
 						rt5514->i2c_regmap,
@@ -957,6 +964,15 @@ static int rt5514_i2s_use_asrc(struct snd_soc_dapm_widget *source,
 	return (rt5514->sysclk > rt5514->lrck * 384);
 }
 
+static int rt5514_is_not_dsp_enabled(struct snd_soc_dapm_widget *source,
+			 struct snd_soc_dapm_widget *sink)
+{
+	struct snd_soc_codec *codec = snd_soc_dapm_to_codec(source->dapm);
+	struct rt5514_priv *rt5514 = snd_soc_codec_get_drvdata(codec);
+
+	return !rt5514->dsp_enabled;
+}
+
 static int rt5514_dmic_event(struct snd_soc_dapm_widget *w,
 				 struct snd_kcontrol *k, int event)
 {
@@ -1086,10 +1102,10 @@ static const struct snd_soc_dapm_route rt5514_dapm_routes[] = {
 	{ "DMIC2", NULL, "DMIC2L" },
 	{ "DMIC2", NULL, "DMIC2R" },
 
-	{ "DMIC1L", NULL, "DMIC CLK" },
-	{ "DMIC1R", NULL, "DMIC CLK" },
-	{ "DMIC2L", NULL, "DMIC CLK" },
-	{ "DMIC2R", NULL, "DMIC CLK" },
+	{ "DMIC1L", NULL, "DMIC CLK", rt5514_is_not_dsp_enabled },
+	{ "DMIC1R", NULL, "DMIC CLK", rt5514_is_not_dsp_enabled },
+	{ "DMIC2L", NULL, "DMIC CLK", rt5514_is_not_dsp_enabled },
+	{ "DMIC2R", NULL, "DMIC CLK", rt5514_is_not_dsp_enabled },
 
 	{ "Stereo1 DMIC Mux", "DMIC1", "DMIC1" },
 	{ "Stereo1 DMIC Mux", "DMIC2", "DMIC2" },
@@ -1136,7 +1152,7 @@ static const struct snd_soc_dapm_route rt5514_dapm_routes[] = {
 
 	{ "Stereo1 ADC MIX", NULL, "Stereo1 ADC MIXL" },
 	{ "Stereo1 ADC MIX", NULL, "Stereo1 ADC MIXR" },
-	{ "Stereo1 ADC MIX", NULL, "adc stereo1 filter" },
+	{ "Stereo1 ADC MIX", NULL, "adc stereo1 filter", rt5514_is_not_dsp_enabled },
 	{ "adc stereo1 filter", NULL, "PLL1", rt5514_is_sys_clk_from_pll },
 	{ "adc stereo1 filter", NULL, "ASRC AD1", rt5514_i2s_use_asrc },
 
@@ -1153,7 +1169,7 @@ static const struct snd_soc_dapm_route rt5514_dapm_routes[] = {
 
 	{ "Stereo2 ADC MIX", NULL, "Stereo2 ADC MIXL" },
 	{ "Stereo2 ADC MIX", NULL, "Stereo2 ADC MIXR" },
-	{ "Stereo2 ADC MIX", NULL, "adc stereo2 filter" },
+	{ "Stereo2 ADC MIX", NULL, "adc stereo2 filter", rt5514_is_not_dsp_enabled },
 	{ "adc stereo2 filter", NULL, "PLL1", rt5514_is_sys_clk_from_pll },
 	{ "adc stereo2 filter", NULL, "ASRC AD2", rt5514_i2s_use_asrc },
 
@@ -1168,6 +1184,12 @@ static int rt5514_hw_params(struct snd_pcm_substream *substream,
 	struct rt5514_priv *rt5514 = snd_soc_codec_get_drvdata(codec);
 	int pre_div, bclk_ms, frame_size;
 	unsigned int val_len = 0;
+
+	if (rt5514->dsp_enabled) {
+		regmap_write(rt5514->i2c_regmap, 0x18002fb0, 2);
+		regmap_write(rt5514->i2c_regmap, 0x18001014, 1);
+		return 0;
+	}
 
 	rt5514->lrck = params_rate(params);
 	pre_div = rl6231_get_clk_info(rt5514->sysclk, rt5514->lrck);
@@ -1219,11 +1241,31 @@ static int rt5514_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
+static int rt5514_hw_free(struct snd_pcm_substream  *substream,
+	struct snd_soc_dai *dai)
+{
+	struct snd_soc_codec *codec = dai->codec;
+	struct rt5514_priv *rt5514 = snd_soc_codec_get_drvdata(codec);
+
+	if (rt5514->dsp_enabled) {
+		regmap_write(rt5514->i2c_regmap, 0x18002fb0, 0);
+		regmap_write(rt5514->i2c_regmap, 0x18001014, 1);
+		msleep(20);
+		rt5514_event_notify(codec, mic_switch);
+		return 0;
+	}
+
+	return 0;
+}
+
 static int rt5514_set_dai_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 {
 	struct snd_soc_codec *codec = dai->codec;
 	struct rt5514_priv *rt5514 = snd_soc_codec_get_drvdata(codec);
 	unsigned int reg_val = 0;
+
+	if (rt5514->dsp_enabled)
+		return 0;
 
 	switch (fmt & SND_SOC_DAIFMT_INV_MASK) {
 	case SND_SOC_DAIFMT_NB_NF:
@@ -1279,6 +1321,9 @@ static int rt5514_set_dai_sysclk(struct snd_soc_dai *dai,
 	struct rt5514_priv *rt5514 = snd_soc_codec_get_drvdata(codec);
 	unsigned int reg_val = 0;
 
+	if (rt5514->dsp_enabled)
+		return 0;
+
 	if (freq == rt5514->sysclk && clk_id == rt5514->sysclk_src)
 		return 0;
 
@@ -1314,6 +1359,9 @@ static int rt5514_set_dai_pll(struct snd_soc_dai *dai, int pll_id, int source,
 	struct rt5514_priv *rt5514 = snd_soc_codec_get_drvdata(codec);
 	struct rl6231_pll_code pll_code;
 	int ret;
+
+	if (rt5514->dsp_enabled)
+		return 0;
 
 	if (!freq_in || !freq_out) {
 		dev_dbg(codec->dev, "PLL disabled\n");
@@ -1377,6 +1425,9 @@ static int rt5514_set_tdm_slot(struct snd_soc_dai *dai, unsigned int tx_mask,
 	struct snd_soc_codec *codec = dai->codec;
 	struct rt5514_priv *rt5514 = snd_soc_codec_get_drvdata(codec);
 	unsigned int val = 0;
+
+	if (rt5514->dsp_enabled)
+		return 0;
 
 	if (rx_mask || tx_mask)
 		val |= RT5514_TDM_MODE;
@@ -1450,21 +1501,6 @@ static int rt5514_set_bias_level(struct snd_soc_codec *codec,
 		break;
 
 	case SND_SOC_BIAS_STANDBY:
-		if (snd_soc_codec_get_bias_level(codec) == SND_SOC_BIAS_OFF) {
-			/*
-			 * If the DSP is enabled in start of recording, the DSP
-			 * should be disabled, and sync back to normal recording
-			 * settings to make sure recording properly.
-			 */
-			if (rt5514->dsp_enabled) {
-				rt5514->dsp_enabled = 0;
-				regmap_multi_reg_write(rt5514->i2c_regmap,
-					rt5514_i2c_patch,
-					ARRAY_SIZE(rt5514_i2c_patch));
-				regcache_mark_dirty(rt5514->regmap);
-				regcache_sync(rt5514->regmap);
-			}
-		}
 		break;
 
 	default:
@@ -1553,6 +1589,7 @@ static int rt5514_i2c_write(void *context, unsigned int reg, unsigned int val)
 
 static const struct snd_soc_dai_ops rt5514_aif_dai_ops = {
 	.hw_params = rt5514_hw_params,
+	.hw_free = rt5514_hw_free,
 	.set_fmt = rt5514_set_dai_fmt,
 	.set_sysclk = rt5514_set_dai_sysclk,
 	.set_pll = rt5514_set_dai_pll,

@@ -88,6 +88,9 @@ static bool spkr_boost_en = true;
 
 static char on_demand_supply_name[][MAX_ON_DEMAND_SUPPLY_NAME_LENGTH] = {
 	"cdc-vdd-mic-bias",
+	"",
+	"cdc-vdda18-l10",
+	"cdc-vdd-l1",
 };
 
 static struct wcd_mbhc_register
@@ -200,6 +203,8 @@ static void msm_anlg_cdc_configure_cap(struct snd_soc_codec *codec,
 				       bool micbias1, bool micbias2);
 static bool msm_anlg_cdc_use_mb(struct snd_soc_codec *codec);
 static bool msm_anlg_cdc_switch_mic_mb(struct snd_soc_codec *codec, int mic);
+static void msm_anlg_cdc_set_micb_v_dynamic(struct snd_soc_codec *codec,
+						int micbias_mv);
 
 static ssize_t codec_state_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
@@ -947,6 +952,7 @@ static const struct wcd_mbhc_cb mbhc_cb = {
 	.set_btn_thr = msm_anlg_cdc_mbhc_program_btn_thr,
 	.extn_use_mb = msm_anlg_cdc_use_mb,
 	.switch_mic_mb = msm_anlg_cdc_switch_mic_mb,
+	.set_micbias_value_dynamic = msm_anlg_cdc_set_micb_v_dynamic,
 };
 
 static const uint32_t wcd_imped_val[] = {4, 8, 12, 13, 16,
@@ -2645,7 +2651,6 @@ static int msm_anlg_cdc_codec_enable_micbias(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
-static bool lower_micbias;
 static int msm_anlg_cdc_codec_micbias_control(struct snd_soc_dapm_widget *w,
 			  struct snd_kcontrol *kcontrol, int event)
 {
@@ -2654,31 +2659,33 @@ static int msm_anlg_cdc_codec_micbias_control(struct snd_soc_dapm_widget *w,
 	struct wcd_mbhc *mbhc;
 
 	mbhc = &priv->mbhc;
-	pr_info("%s: event = %d micbias_enable = %d lower_micbias = %d\n",
-			__func__, event, mbhc->micbias_enable, lower_micbias);
+	pr_info("%s: event = %d micbias_enable = %d mbhc->current_plug = %d\n",
+			__func__, event, mbhc->micbias_enable, mbhc->current_plug);
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
-		if (mbhc->mbhc_cb->set_micbias_value && mbhc->micbias_enable) {
-			mbhc->mbhc_cb->set_micbias_value(codec);
-			lower_micbias = true;
-		}
+		msm_anlg_cdc_set_micb_v_dynamic(codec, 1800000);
 		break;
 	case SND_SOC_DAPM_POST_PMD:
-		if (mbhc->mbhc_cb->mbhc_common_micb_ctrl &&
-			mbhc->micbias_enable &&
-			lower_micbias) {
-			mbhc->mbhc_cb->mbhc_common_micb_ctrl(codec,
+		if (mbhc->micbias_enable) {
+			msm_anlg_cdc_mbhc_common_micb_ctrl(codec,
 					MBHC_COMMON_MICB_PRECHARGE,
 					true);
-			mbhc->mbhc_cb->mbhc_common_micb_ctrl(codec,
+			msm_anlg_cdc_mbhc_common_micb_ctrl(codec,
 					MBHC_COMMON_MICB_SET_VAL,
 					true);
 			msleep(50);
-			mbhc->mbhc_cb->mbhc_common_micb_ctrl(codec,
+			msm_anlg_cdc_mbhc_common_micb_ctrl(codec,
 					MBHC_COMMON_MICB_PRECHARGE,
 					false);
-		}
-		lower_micbias = false;
+		} else
+			msm_anlg_cdc_mbhc_common_micb_ctrl(codec,
+					MBHC_COMMON_MICB_PRECHARGE,
+					true);
+			msm_anlg_cdc_set_micb_v(codec);
+			msleep(50);
+			msm_anlg_cdc_mbhc_common_micb_ctrl(codec,
+					MBHC_COMMON_MICB_PRECHARGE,
+					false);
 		break;
 	default:
 		pr_err("%s: invalid DAPM event %d\n", __func__, event);
@@ -3583,6 +3590,16 @@ static const struct snd_soc_dapm_widget msm_anlg_cdc_dapm_widgets[] = {
 		msm_anlg_cdc_codec_enable_on_demand_supply,
 		SND_SOC_DAPM_PRE_PMU |
 		SND_SOC_DAPM_POST_PMD),
+	SND_SOC_DAPM_SUPPLY("VDDA18_L10_REGULATOR", SND_SOC_NOPM,
+		ON_DEMAND_VDDA18_L10, 0,
+		msm_anlg_cdc_codec_enable_on_demand_supply,
+		SND_SOC_DAPM_PRE_PMU |
+		SND_SOC_DAPM_POST_PMD),
+	SND_SOC_DAPM_SUPPLY("VDD_L1_REGULATOR", SND_SOC_NOPM,
+		ON_DEMAND_VDD_L1, 0,
+		msm_anlg_cdc_codec_enable_on_demand_supply,
+		SND_SOC_DAPM_PRE_PMU |
+		SND_SOC_DAPM_POST_PMD),
 
 	SND_SOC_DAPM_MICBIAS_E("MIC BIAS Internal1",
 		MSM89XX_PMIC_ANALOG_MICB_1_EN, 7, 0,
@@ -4062,6 +4079,19 @@ static void msm_anlg_cdc_set_micb_v(struct snd_soc_codec *codec)
 			0xF8, (reg_val << 3));
 }
 
+static void msm_anlg_cdc_set_micb_v_dynamic(struct snd_soc_codec *codec,
+					     int micbias_mv)
+{
+	u8 reg_val;
+
+	reg_val = VOLTAGE_CONVERTER(micbias_mv, MICBIAS_MIN_VAL,
+			MICBIAS_STEP_SIZE);
+	dev_info(codec->dev, "cfilt1_mv %d reg_val %x\n",
+			micbias_mv, reg_val);
+	snd_soc_update_bits(codec, MSM89XX_PMIC_ANALOG_MICB_1_VAL,
+			0xF8, (reg_val << 3));
+}
+
 static void msm_anlg_cdc_set_boost_v(struct snd_soc_codec *codec)
 {
 	struct sdm660_cdc_priv *sdm660_cdc_priv =
@@ -4284,6 +4314,20 @@ static int msm_anlg_cdc_soc_probe(struct snd_soc_codec *codec)
 	atomic_set(&sdm660_cdc->on_demand_list[ON_DEMAND_MICBIAS].ref,
 		   0);
 
+	msm_anlg_cdc_update_micbias_regulator(
+				sdm660_cdc,
+				on_demand_supply_name[ON_DEMAND_VDD_L1],
+				&sdm660_cdc->on_demand_list[ON_DEMAND_VDD_L1]);
+	atomic_set(&sdm660_cdc->on_demand_list[ON_DEMAND_VDD_L1].ref,
+		   0);
+
+	msm_anlg_cdc_update_micbias_regulator(
+			sdm660_cdc,
+			on_demand_supply_name[ON_DEMAND_VDDA18_L10],
+			&sdm660_cdc->on_demand_list[ON_DEMAND_VDDA18_L10]);
+	atomic_set(&sdm660_cdc->on_demand_list[ON_DEMAND_VDDA18_L10].ref,
+		   0);
+
 	sdm660_cdc->fw_data = devm_kzalloc(codec->dev,
 					sizeof(*(sdm660_cdc->fw_data)),
 					GFP_KERNEL);
@@ -4330,6 +4374,13 @@ static int msm_anlg_cdc_soc_remove(struct snd_soc_codec *codec)
 	sdm660_cdc_priv->on_demand_list[ON_DEMAND_MICBIAS].supply = NULL;
 	atomic_set(&sdm660_cdc_priv->on_demand_list[ON_DEMAND_MICBIAS].ref,
 		   0);
+	sdm660_cdc_priv->on_demand_list[ON_DEMAND_VDD_L1].supply = NULL;
+	atomic_set(&sdm660_cdc_priv->on_demand_list[ON_DEMAND_VDD_L1].ref,
+		   0);
+	sdm660_cdc_priv->on_demand_list[ON_DEMAND_VDDA18_L10].supply = NULL;
+	atomic_set(&sdm660_cdc_priv->on_demand_list[ON_DEMAND_VDDA18_L10].ref,
+		   0);
+
 	wcd_mbhc_deinit(&sdm660_cdc_priv->mbhc);
 
 	return 0;
@@ -4755,7 +4806,6 @@ static int msm_anlg_cdc_probe(struct platform_device *pdev)
 				     &soc_codec_dev_sdm660_cdc,
 				     msm_anlg_cdc_i2s_dai,
 				     ARRAY_SIZE(msm_anlg_cdc_i2s_dai));
-	lower_micbias = false;
 	if (ret) {
 		dev_err(&pdev->dev,
 			"%s:snd_soc_register_codec failed with error %d\n",

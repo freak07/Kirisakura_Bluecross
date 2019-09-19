@@ -36,7 +36,7 @@
 #include <arm_neon.h>
 #endif
 
-#ifdef CONFIG_LD_LLD
+#ifdef CONFIG_LTO_CLANG
 #pragma clang diagnostic ignored "-Wincompatible-pointer-types"
 #endif
 

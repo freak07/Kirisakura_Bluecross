@@ -25,12 +25,36 @@
 #include <sys/wait.h>
 #include <sys/param.h>
 
+#include "binder_ndk.h"
+#include "log_helpers.h"
+#include "dnsResolver.h"
+
 #ifndef WG_PACKAGE_NAME
 #define WG_PACKAGE_NAME "com.wireguard.android"
 #endif
 #ifndef WG_CONFIG_SEARCH_PATHS
 #define WG_CONFIG_SEARCH_PATHS "/data/misc/wireguard /data/data/" WG_PACKAGE_NAME "/files"
 #endif
+
+#ifndef WG_DNS_SAMPLE_VALIDITY
+#define WG_DNS_SAMPLE_VALIDITY 1800 // sec
+#endif
+#ifndef WG_DNS_SUCCESS_THRESHOLD
+#define WG_DNS_SUCCESS_THRESHOLD 25
+#endif
+#ifndef WG_DNS_MIN_SAMPLES
+#define WG_DNS_MIN_SAMPLES 8
+#endif
+#ifndef WG_DNS_MAX_SAMPLES
+#define WG_DNS_MAX_SAMPLES 8
+#endif
+#ifndef WG_DNS_BASE_TIMEOUT
+#define WG_DNS_BASE_TIMEOUT 5000 // msec
+#endif
+#ifndef WG_DNS_RETRY_COUNT
+#define WG_DNS_RETRY_COUNT 2
+#endif
+
 
 #define _printf_(x, y) __attribute__((format(printf, x, y)))
 #define _cleanup_(x) __attribute__((cleanup(x)))
@@ -442,17 +466,89 @@ static void set_dnses(unsigned int netid, const char *dnses)
 	_cleanup_free_ char *mutable = xstrdup(dnses);
 	_cleanup_free_ char *arglist = xmalloc(len * 4 + 1);
 	_cleanup_free_ char *arg = xmalloc(len + 4);
+	_cleanup_free_ char **dns_list = xmalloc(len + 2);
 
 	if (!len)
 		return;
 	arglist[0] = '\0';
 
+	int i = 0;
 	for (char *dns = strtok(mutable, ", \t\n"); dns; dns = strtok(NULL, ", \t\n")) {
 		if (strchr(dns, '\'') || strchr(dns, '\\'))
 			continue;
 		snprintf(arg, len + 3, "'%s' ", dns);
 		strncat(arglist, arg, len * 4 - 1);
+		dns_list[i] = xstrdup(dns);
+		i++;
 	}
+	dns_list[i] = NULL;
+
+	if (binder_is_available())
+	{
+		if (dns_list[0] == NULL)
+			return;
+
+		void *handle = dnsResolver_getHandle();
+		if (!handle)
+		{
+			ERR("can't get Binder handle, falling back to ndc");
+			goto dnses_fallback;
+		}
+
+		printf("[#] <binder>::dnsResolver::createNetworkCache(%u)\n", netid);
+		int32_t status = dnsResolver_createNetworkCache(handle, netid);
+		if (status != 0)
+		{
+			ERR("can't create network cache");
+			goto dnses_fallback;
+		}
+
+		struct ResolverParamsParcel params =
+		{
+			.netId = netid,
+			.sampleValiditySeconds = WG_DNS_SAMPLE_VALIDITY,
+			.successThreshold = WG_DNS_SUCCESS_THRESHOLD,
+			.minSamples = WG_DNS_MIN_SAMPLES,
+			.maxSamples = WG_DNS_MAX_SAMPLES,
+			.baseTimeoutMsec = WG_DNS_BASE_TIMEOUT,
+			.retryCount = WG_DNS_RETRY_COUNT,
+			.servers = dns_list,
+			.domains = (char *[]){NULL},
+			.tlsName = "",
+			.tlsServers = (char *[]){NULL},
+			.tlsFingerprints = (char *[]){NULL}
+		};
+		const char multiple[] = ", ...";
+		const char single[] = "";
+		// some pretty printing for the log
+		printf("[#] <binder>::dnsResolver::setResolverConfiguration"
+		       "(%u, [%s%s], [], %d, %d, %d, %d, %d, %d, [], [])\n",
+		       netid,
+		       dns_list[0],
+		       dns_list[1] != NULL ? multiple : single,
+		       WG_DNS_SAMPLE_VALIDITY,
+		       WG_DNS_SUCCESS_THRESHOLD,
+		       WG_DNS_MIN_SAMPLES,
+		       WG_DNS_MAX_SAMPLES,
+		       WG_DNS_BASE_TIMEOUT,
+		       WG_DNS_RETRY_COUNT);
+
+		status = dnsResolver_setResolverConfiguration(handle, &params);
+
+		dnsResolver_decRef(handle);
+		for (int i = 0; dns_list[i] != NULL; i++)
+			free(dns_list[i]);
+
+		if (status != 0)
+		{
+			ERR("can't set DNS servers through Binder, "
+			    "falling back to ndc");
+			goto dnses_fallback;
+		}
+		return;
+	}
+
+dnses_fallback:
 	if (!strlen(arglist))
 		return;
 	cndc("resolver setnetdns %u '' %s", netid, arglist);

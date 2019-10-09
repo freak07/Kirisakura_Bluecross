@@ -792,9 +792,12 @@ static int sdx_be_hw_params_fixup(struct snd_soc_pcm_runtime *rt,
 {
 	struct snd_interval *rate = hw_param_interval(params,
 						      SNDRV_PCM_HW_PARAM_RATE);
+	struct snd_interval *channels =
+			hw_param_interval(params, SNDRV_PCM_HW_PARAM_CHANNELS);
 	param_set_mask(params, SNDRV_PCM_HW_PARAM_FORMAT,
 		       SNDRV_PCM_FORMAT_S16_LE);
 	rate->min = rate->max = sdx_mi2s_rate;
+	channels->min = sdx_mi2s_rx_ch;
 	return 0;
 }
 

@@ -1929,6 +1929,7 @@ static int msm_dai_q6_hw_params(struct snd_pcm_substream *substream,
 		rc = msm_dai_q6_afe_rtproxy_hw_params(params, dai);
 		break;
 	case VOICE_PLAYBACK_TX:
+	case VOICE_PLAYBACK_DL_TX:
 	case VOICE2_PLAYBACK_TX:
 	case VOICE_RECORD_RX:
 	case VOICE_RECORD_TX:
@@ -3082,6 +3083,23 @@ static struct snd_soc_dai_driver msm_dai_q6_voc_playback_dai[] = {
 		},
 		.ops = &msm_dai_q6_ops,
 		.id = VOICE2_PLAYBACK_TX,
+		.probe = msm_dai_q6_dai_probe,
+		.remove = msm_dai_q6_dai_remove,
+	},
+	{
+		.playback = {
+			.stream_name = "Voice Downlink Playback",
+			.aif_name = "VOICE_PLAYBACK_DL_TX",
+			.rates = SNDRV_PCM_RATE_48000 | SNDRV_PCM_RATE_8000 |
+				 SNDRV_PCM_RATE_16000,
+			.formats = SNDRV_PCM_FMTBIT_S16_LE,
+			.channels_min = 1,
+			.channels_max = 2,
+			.rate_min =     8000,
+			.rate_max =     48000,
+		},
+		.ops = &msm_dai_q6_ops,
+		.id = VOICE_PLAYBACK_DL_TX,
 		.probe = msm_dai_q6_dai_probe,
 		.remove = msm_dai_q6_dai_remove,
 	},
@@ -5160,6 +5178,9 @@ register_afe_capture:
 			pr_err("%s: Device not found stream name %s\n",
 			__func__, stream_name);
 		break;
+	case VOICE_PLAYBACK_DL_TX:
+		strlcpy(stream_name, "Voice Downlink Playback", 80);
+		goto register_voice_playback;
 	case VOICE_PLAYBACK_TX:
 		strlcpy(stream_name, "Voice Farend Playback", 80);
 		goto register_voice_playback;

@@ -2773,12 +2773,30 @@ static struct snd_soc_dai_link sdx_common_dai_links[] = {
 		.codec_dai_name = "snd-soc-dummy-dai",
 		.codec_name = "snd-soc-dummy",
 	},
+	{
+	/*hw:x,33*/
+		.name = SDX_DAILINK_NAME(Compress2),
+		.stream_name = "COMPR2",
+		.cpu_dai_name = "MultiMedia7",
+		.platform_name = "msm-compress-dsp",
+		.dynamic = 1,
+		.async_ops = ASYNC_DPCM_SND_SOC_HW_PARAMS,
+		.dpcm_playback = 1,
+		.dpcm_capture = 1,
+		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
+			SND_SOC_DPCM_TRIGGER_POST},
+		.codec_dai_name = "snd-soc-dummy-dai",
+		.codec_name = "snd-soc-dummy",
+		.ignore_suspend = 1,
+		.ignore_pmdown_time = 1,
+		.id = MSM_FRONTEND_DAI_MULTIMEDIA7,
+	},
 
 };
 
 static struct snd_soc_dai_link sdx_common_misc_fe_dai_links[] = {
 	{
-	/*hw:x,33*/
+	/*hw:x,34*/
 		.name = SDX_DAILINK_NAME(ASM Loopback),
 		.stream_name = "MultiMedia6",
 		.cpu_dai_name = "MultiMedia6",
@@ -2880,6 +2898,21 @@ static struct snd_soc_dai_link sdx_common_be_dai_links[] = {
 		.no_pcm = 1,
 		.dpcm_playback = 1,
 		.id = MSM_BACKEND_DAI_VOICE_PLAYBACK_TX,
+		.be_hw_params_fixup = sdx_be_hw_params_fixup,
+		.ignore_suspend = 1,
+		.ignore_pmdown_time = 1,
+	},
+	/* Incall Music BACK END DAI Link */
+	{
+		.name = LPASS_BE_VOICE_PLAYBACK_DL_TX,
+		.stream_name = "Voice Downlink Playback",
+		.cpu_dai_name = "msm-dai-q6-dev.32774",
+		.platform_name = "msm-pcm-routing",
+		.codec_name = "msm-stub-codec.1",
+		.codec_dai_name = "msm-stub-rx",
+		.no_pcm = 1,
+		.dpcm_playback = 1,
+		.id = MSM_BACKEND_DAI_VOICE_PLAYBACK_DL_TX,
 		.be_hw_params_fixup = sdx_be_hw_params_fixup,
 		.ignore_suspend = 1,
 		.ignore_pmdown_time = 1,

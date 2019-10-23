@@ -6093,7 +6093,7 @@ int voc_start_playback(uint32_t set, uint16_t port_id)
 	voice_itr_init(&itr, ALL_SESSION_VSID);
 	while (voice_itr_get_next_session(&itr, &v)) {
 		if ((v != NULL) &&
-		    (((port_id == VOICE_PLAYBACK_TX) &&
+		    ((((port_id == VOICE_PLAYBACK_TX) || (port_id == VOICE_PLAYBACK_DL_TX))&&
 		       is_sub1_vsid(v->session_id)) ||
 		     ((port_id == VOICE2_PLAYBACK_TX) &&
 		       is_sub2_vsid(v->session_id)))) {

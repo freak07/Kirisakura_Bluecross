@@ -2505,7 +2505,7 @@ int sysctl_max_threads(struct ctl_table *table, int write,
 	struct ctl_table t;
 	int ret;
 	int threads = max_threads;
-	int min = 1;
+	int min = MIN_THREADS;
 	int max = MAX_THREADS;
 
 	t = *table;
@@ -2517,7 +2517,7 @@ int sysctl_max_threads(struct ctl_table *table, int write,
 	if (ret || !write)
 		return ret;
 
-	max_threads = threads;
+	set_max_threads(threads);
 
 	return 0;
 }

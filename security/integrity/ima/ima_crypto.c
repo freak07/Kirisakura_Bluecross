@@ -298,11 +298,8 @@ static int ima_calc_file_hash_atfm(struct file *file,
 		rbuf_len = min_t(loff_t, i_size - offset, rbuf_size[active]);
 		rc = integrity_kernel_read(file, offset, rbuf[active],
 					   rbuf_len);
-		if (rc != rbuf_len) {
-			if (rc >= 0)
-				rc = -EINVAL;
+		if (rc != rbuf_len)
 			goto out3;
-		}
 
 		if (rbuf[1] && offset) {
 			/* Using two buffers, and it is not the first

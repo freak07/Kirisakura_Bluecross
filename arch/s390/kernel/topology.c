@@ -256,8 +256,7 @@ int arch_update_cpu_topology(void)
 		topology_update_polarization_simple();
 	for_each_online_cpu(cpu) {
 		dev = get_cpu_device(cpu);
-		if (dev)
-			kobject_uevent(&dev->kobj, KOBJ_CHANGE);
+		kobject_uevent(&dev->kobj, KOBJ_CHANGE);
 	}
 	return rc;
 }

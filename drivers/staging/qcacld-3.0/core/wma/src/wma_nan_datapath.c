@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2019 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -1277,59 +1277,6 @@ void wma_add_bss_ndi_mode(tp_wma_handle wma, tpAddBssParams add_bss)
 send_fail_resp:
 	add_bss->status = QDF_STATUS_E_FAILURE;
 	wma_send_msg_high_priority(wma, WMA_ADD_BSS_RSP, (void *)add_bss, 0);
-}
-
-/**
- * wma_delete_all_nan_remote_peers() - Delete all nan peers
- * @wma:  wma handle
- * @vdev_id: vdev id
- *
- * Return: None
- */
-void wma_delete_all_nan_remote_peers(tp_wma_handle wma, uint32_t vdev_id)
-{
-	ol_txrx_vdev_handle vdev;
-	ol_txrx_peer_handle peer, temp;
-
-	if (vdev_id >= wma->max_bssid) {
-		WMA_LOGE("%s: invalid vdev_id = %d", __func__, vdev_id);
-		return;
-	}
-
-	vdev = wma->interfaces[vdev_id].handle;
-	if (!vdev) {
-		WMA_LOGE("%s: vdev is NULL for vdev_id = %d",
-			 __func__, vdev_id);
-		return;
-	}
-
-	/* remove all remote peers of ndi */
-	qdf_spin_lock_bh(&vdev->pdev->peer_ref_mutex);
-
-	temp = NULL;
-	TAILQ_FOREACH_REVERSE(peer, &vdev->peer_list,
-		peer_list_t, peer_list_elem) {
-		if (temp) {
-			qdf_spin_unlock_bh(&vdev->pdev->peer_ref_mutex);
-			if (qdf_atomic_read(
-				&temp->delete_in_progress) == 0)
-				wma_remove_peer(wma, temp->mac_addr.raw,
-					vdev_id, temp, false);
-			qdf_spin_lock_bh(&vdev->pdev->peer_ref_mutex);
-		}
-		/* self peer is deleted last */
-		if (peer == TAILQ_FIRST(&vdev->peer_list)) {
-			WMA_LOGE("%s: self peer removed", __func__);
-			break;
-		}
-		temp = peer;
-	}
-	qdf_spin_unlock_bh(&vdev->pdev->peer_ref_mutex);
-
-	/* remove ndi self peer last */
-	peer = TAILQ_FIRST(&vdev->peer_list);
-	wma_remove_peer(wma, peer->mac_addr.raw, vdev_id, peer,
-			false);
 }
 
 /**

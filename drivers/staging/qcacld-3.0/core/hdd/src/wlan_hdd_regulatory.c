@@ -80,7 +80,7 @@ hdd_world_regrules_60_61_62 = {
 		REG_RULE_2412_2462,
 		REG_RULE_2467_2472,
 		REG_RULE_5180_5320,
-		REG_RULE_5500_5700,
+		REG_RULE_5500_5720,
 		REG_RULE_5745_5825,
 	}
 };
@@ -621,9 +621,18 @@ static void hdd_process_regulatory_data(hdd_context_t *hdd_ctx,
 			} else {
 				cds_chan->state = CHANNEL_STATE_ENABLE;
 			}
+			/* This check is to mark SRD as passive if ini is 0 */
+			if (!hdd_ctx->config->etsi_srd_chan_in_master_mode &&
+			    cds_is_etsi13_regdmn_srd_chan(
+						    wiphy_chan->center_freq)) {
+				hdd_debug("freq %d is SRD, marked as passive",
+					  wiphy_chan->center_freq);
+				wiphy_chan->flags |=
+						IEEE80211_CHAN_PASSIVE_SCAN;
+				cds_chan->state = CHANNEL_STATE_DFS;
+			}
 			cds_chan->pwr_limit = wiphy_chan->max_power;
 			cds_chan->flags = wiphy_chan->flags;
-
 		}
 	}
 
@@ -809,7 +818,7 @@ int hdd_apply_cached_country_info(hdd_context_t *hdd_ctx)
 	ret_val = hdd_update_regulatory_info(hdd_ctx);
 	if (ret_val)
 		return ret_val;
-
+	cds_fill_and_send_ctl_to_fw(&hdd_ctx->reg);
 	hdd_process_regulatory_data(hdd_ctx, hdd_ctx->wiphy,
 				    hdd_ctx->reg.reset);
 
@@ -937,8 +946,6 @@ void hdd_reg_notifier(struct wiphy *wiphy,
 		}
 		sme_generic_change_country_code(hdd_ctx->hHal,
 						hdd_ctx->reg.alpha2);
-
-		cds_fill_and_send_ctl_to_fw(&hdd_ctx->reg);
 
 		cds_get_dfs_region(&dfs_reg);
 		cds_set_wma_dfs_region(dfs_reg);

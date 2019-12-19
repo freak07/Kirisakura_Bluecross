@@ -1824,11 +1824,13 @@ static QDF_STATUS hdd_dis_connect_handler(hdd_adapter_t *pAdapter,
 	 * eConnectionState_Connecting state mean that connection is in
 	 * progress so no need to set state to eConnectionState_NotConnected
 	 */
-	if ((eConnectionState_Connecting !=
-	    pHddStaCtx->conn_info.connState)) {
+	if (eConnectionState_Connecting != pHddStaCtx->conn_info.connState)
 		hdd_conn_set_connection_state(pAdapter,
 					      eConnectionState_NotConnected);
-	}
+
+	/* Clear roaming in progress flag */
+	hdd_set_roaming_in_progress(false);
+
 #ifdef WLAN_FEATURE_GTK_OFFLOAD
 	if ((QDF_STA_MODE == pAdapter->device_mode) ||
 	    (QDF_P2P_CLIENT_MODE == pAdapter->device_mode)) {

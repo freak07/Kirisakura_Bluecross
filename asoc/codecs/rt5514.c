@@ -913,8 +913,8 @@ static int rt5514_calc_dmic_clk(struct snd_soc_codec *codec, int rate)
 	}
 
 	for (i = 0; i < ARRAY_SIZE(div); i++) {
-		/* find divider that gives DMIC frequency below 3.072MHz */
-		if (3072000 * div[i] >= rate)
+		/* find divider that gives DMIC frequency below 2.048MHz */
+		if (2048000 * div[i] >= rate)
 			return i;
 	}
 
@@ -954,7 +954,7 @@ static int rt5514_is_sys_clk_from_pll(struct snd_soc_dapm_widget *source,
 	else
 		return 0;
 }
-
+/*
 static int rt5514_i2s_use_asrc(struct snd_soc_dapm_widget *source,
 	struct snd_soc_dapm_widget *sink)
 {
@@ -963,7 +963,7 @@ static int rt5514_i2s_use_asrc(struct snd_soc_dapm_widget *source,
 
 	return (rt5514->sysclk > rt5514->lrck * 384);
 }
-
+*/
 static int rt5514_is_not_dsp_enabled(struct snd_soc_dapm_widget *source,
 			 struct snd_soc_dapm_widget *sink)
 {
@@ -1154,7 +1154,7 @@ static const struct snd_soc_dapm_route rt5514_dapm_routes[] = {
 	{ "Stereo1 ADC MIX", NULL, "Stereo1 ADC MIXR" },
 	{ "Stereo1 ADC MIX", NULL, "adc stereo1 filter", rt5514_is_not_dsp_enabled },
 	{ "adc stereo1 filter", NULL, "PLL1", rt5514_is_sys_clk_from_pll },
-	{ "adc stereo1 filter", NULL, "ASRC AD1", rt5514_i2s_use_asrc },
+	{ "adc stereo1 filter", NULL, "ASRC AD1" },
 
 	{ "Stereo2 DMIC Mux", "DMIC1", "DMIC1" },
 	{ "Stereo2 DMIC Mux", "DMIC2", "DMIC2" },
@@ -1171,7 +1171,7 @@ static const struct snd_soc_dapm_route rt5514_dapm_routes[] = {
 	{ "Stereo2 ADC MIX", NULL, "Stereo2 ADC MIXR" },
 	{ "Stereo2 ADC MIX", NULL, "adc stereo2 filter", rt5514_is_not_dsp_enabled },
 	{ "adc stereo2 filter", NULL, "PLL1", rt5514_is_sys_clk_from_pll },
-	{ "adc stereo2 filter", NULL, "ASRC AD2", rt5514_i2s_use_asrc },
+	{ "adc stereo2 filter", NULL, "ASRC AD2" },
 
 	{ "AIF1TX", NULL, "Stereo1 ADC MIX"},
 	{ "AIF1TX", NULL, "Stereo2 ADC MIX"},

@@ -1857,7 +1857,7 @@ static int msm_tdm_snd_hw_params(struct snd_pcm_substream *substream,
 
 			ret = snd_soc_dai_set_pll(codec_dai, 0, 1,
 				Q6AFE_LPASS_IBIT_CLK_12_P288_MHZ,
-				Q6AFE_LPASS_IBIT_CLK_12_P288_MHZ);
+				Q6AFE_LPASS_IBIT_CLK_12_P288_MHZ*2);
 
 			if (ret < 0) {
 				pr_err("%s: failed to set codec pll, err:%d\n",
@@ -1865,7 +1865,7 @@ static int msm_tdm_snd_hw_params(struct snd_pcm_substream *substream,
 			}
 
 			ret = snd_soc_dai_set_sysclk(codec_dai, 1,
-				Q6AFE_LPASS_IBIT_CLK_12_P288_MHZ,
+				Q6AFE_LPASS_IBIT_CLK_12_P288_MHZ*2,
 				SND_SOC_CLOCK_IN);
 
 			if (ret < 0) {

@@ -84,13 +84,17 @@ struct index_data_rate_type {
 
 /**
  * struct hdd_ll_stats_priv - hdd link layer stats private
- *
+ * @ll_stats: head to different link layer stats received in scheduler
+ *            thread context
  * @request_id: userspace-assigned link layer stats request id
  * @request_bitmap: userspace-assigned link layer stats request bitmap
+ * @ll_stats_lock: Lock to serially access request_bitmap
  */
 struct hdd_ll_stats_priv {
+	qdf_list_t ll_stats_q;
 	uint32_t request_id;
 	uint32_t request_bitmap;
+	qdf_spinlock_t ll_stats_lock;
 };
 
 /*

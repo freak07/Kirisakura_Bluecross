@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1627,11 +1627,11 @@ static int msm_anlg_cdc_pa_gain_get(struct snd_kcontrol *kcontrol,
 		if (ear_pa_gain == 0x00) {
 			ucontrol->value.integer.value[0] = 3;
 		} else if (ear_pa_gain == 0x01) {
-			ucontrol->value.integer.value[1] = 2;
+			ucontrol->value.integer.value[0] = 2;
 		} else if (ear_pa_gain == 0x02) {
-			ucontrol->value.integer.value[2] = 1;
+			ucontrol->value.integer.value[0] = 1;
 		} else if (ear_pa_gain == 0x03) {
-			ucontrol->value.integer.value[3] = 0;
+			ucontrol->value.integer.value[0] = 0;
 		} else {
 			dev_err(codec->dev,
 				"%s: ERROR: Unsupported Ear Gain = 0x%x\n",
@@ -1653,7 +1653,6 @@ static int msm_anlg_cdc_pa_gain_get(struct snd_kcontrol *kcontrol,
 			return -EINVAL;
 		}
 	}
-	ucontrol->value.integer.value[0] = ear_pa_gain;
 	dev_dbg(codec->dev, "%s: ear_pa_gain = 0x%x\n", __func__, ear_pa_gain);
 	return 0;
 }
@@ -3937,7 +3936,6 @@ static int msm_anlg_cdc_device_down(struct snd_soc_codec *codec)
 		MSM89XX_PMIC_ANALOG_SPKR_DAC_CTL, 0x93);
 
 	msm_anlg_cdc_dig_notifier_call(codec, DIG_CDC_EVENT_SSR_DOWN);
-	atomic_set(&pdata->int_mclk0_enabled, false);
 	set_bit(BUS_DOWN, &sdm660_cdc_priv->status_mask);
 	snd_soc_card_change_online_state(codec->component.card, 0);
 

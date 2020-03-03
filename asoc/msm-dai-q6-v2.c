@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -33,6 +33,8 @@
 #define MSM_DAI_QUAT_AUXPCM_DT_DEV_ID 4
 #define MSM_DAI_QUIN_AUXPCM_DT_DEV_ID 5
 
+#define MSM_DAI_TWS_CHANNEL_MODE_ONE 1
+#define MSM_DAI_TWS_CHANNEL_MODE_TWO 2
 
 #define spdif_clock_value(rate) (2*rate*32*2)
 #define CHANNEL_STATUS_SIZE 24
@@ -1932,6 +1934,7 @@ static int msm_dai_q6_hw_params(struct snd_pcm_substream *substream,
 		rc = msm_dai_q6_afe_rtproxy_hw_params(params, dai);
 		break;
 	case VOICE_PLAYBACK_TX:
+	case VOICE_PLAYBACK_DL_TX:
 	case VOICE2_PLAYBACK_TX:
 	case VOICE_RECORD_RX:
 	case VOICE_RECORD_TX:
@@ -2383,6 +2386,12 @@ static const struct soc_enum afe_input_bit_format_enum[] = {
 	SOC_ENUM_SINGLE_EXT(3, afe_input_bit_format_text),
 };
 
+static const char *const tws_chs_mode_text[] = {"Zero", "One", "Two"};
+
+static const struct soc_enum tws_chs_mode_enum[] = {
+	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(tws_chs_mode_text), tws_chs_mode_text),
+};
+
 static int msm_dai_q6_afe_input_channel_get(struct snd_kcontrol *kcontrol,
 			struct snd_ctl_elem_value *ucontrol)
 {
@@ -2409,6 +2418,61 @@ static int msm_dai_q6_afe_input_channel_put(struct snd_kcontrol *kcontrol,
 	}
 
 	return 0;
+}
+
+static int msm_dai_q6_tws_channel_mode_get(struct snd_kcontrol *kcontrol,
+			struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_dai *dai = kcontrol->private_data;
+	struct msm_dai_q6_dai_data *dai_data = NULL;
+
+	if (dai)
+		dai_data = dev_get_drvdata(dai->dev);
+
+	if (dai_data) {
+		ucontrol->value.integer.value[0] =
+				dai_data->enc_config.mono_mode;
+		pr_debug("%s:tws channel mode = %d\n",
+			 __func__, dai_data->enc_config.mono_mode);
+	}
+
+	return 0;
+}
+
+static int msm_dai_q6_tws_channel_mode_put(struct snd_kcontrol *kcontrol,
+			struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_dai *dai = kcontrol->private_data;
+	struct msm_dai_q6_dai_data *dai_data = NULL;
+	int ret = 0;
+
+	if (dai)
+		dai_data = dev_get_drvdata(dai->dev);
+
+	if (dai_data && (dai_data->enc_config.format == ENC_FMT_APTX)) {
+		if (test_bit(STATUS_PORT_STARTED, dai_data->status_mask)) {
+			ret = afe_set_tws_channel_mode(dai->id,
+					ucontrol->value.integer.value[0]);
+			if (ret < 0) {
+				pr_err("%s: channel mode setting failed for TWS\n",
+				__func__);
+				goto exit;
+			} else {
+				pr_debug("%s: updating tws channel mode : %d\n",
+				__func__, dai_data->enc_config.mono_mode);
+			}
+		}
+		if (ucontrol->value.integer.value[0] ==
+			MSM_DAI_TWS_CHANNEL_MODE_ONE ||
+			ucontrol->value.integer.value[0] ==
+			MSM_DAI_TWS_CHANNEL_MODE_TWO)
+			dai_data->enc_config.mono_mode =
+				ucontrol->value.integer.value[0];
+		else
+			return -EINVAL;
+	}
+exit:
+	return ret;
 }
 
 static int msm_dai_q6_afe_input_bit_format_get(
@@ -2519,6 +2583,9 @@ static const struct snd_kcontrol_new afe_enc_config_controls[] = {
 		       0, 0, 1, 0,
 		       msm_dai_q6_afe_scrambler_mode_get,
 		       msm_dai_q6_afe_scrambler_mode_put),
+	SOC_ENUM_EXT("TWS Channel Mode", tws_chs_mode_enum[0],
+		       msm_dai_q6_tws_channel_mode_get,
+		       msm_dai_q6_tws_channel_mode_put)
 };
 
 static int  msm_dai_q6_afe_dec_cfg_info(struct snd_kcontrol *kcontrol,
@@ -2751,6 +2818,9 @@ static int msm_dai_q6_dai_probe(struct snd_soc_dai *dai)
 		rc = snd_ctl_add(dai->component->card->snd_card,
 				 snd_ctl_new1(&afe_enc_config_controls[3],
 				 dai_data));
+		rc = snd_ctl_add(dai->component->card->snd_card,
+				 snd_ctl_new1(&afe_enc_config_controls[4],
+				 dai));
 		rc = snd_ctl_add(dai->component->card->snd_card,
 				snd_ctl_new1(&avd_drift_config_controls[2],
 					dai));
@@ -3018,6 +3088,23 @@ static struct snd_soc_dai_driver msm_dai_q6_voc_playback_dai[] = {
 		},
 		.ops = &msm_dai_q6_ops,
 		.id = VOICE2_PLAYBACK_TX,
+		.probe = msm_dai_q6_dai_probe,
+		.remove = msm_dai_q6_dai_remove,
+	},
+	{
+		.playback = {
+			.stream_name = "Voice Downlink Playback",
+			.aif_name = "VOICE_PLAYBACK_DL_TX",
+			.rates = SNDRV_PCM_RATE_48000 | SNDRV_PCM_RATE_8000 |
+				 SNDRV_PCM_RATE_16000,
+			.formats = SNDRV_PCM_FMTBIT_S16_LE,
+			.channels_min = 1,
+			.channels_max = 2,
+			.rate_min =     8000,
+			.rate_max =     48000,
+		},
+		.ops = &msm_dai_q6_ops,
+		.id = VOICE_PLAYBACK_DL_TX,
 		.probe = msm_dai_q6_dai_probe,
 		.remove = msm_dai_q6_dai_remove,
 	},
@@ -5096,6 +5183,9 @@ register_afe_capture:
 			pr_err("%s: Device not found stream name %s\n",
 			__func__, stream_name);
 		break;
+	case VOICE_PLAYBACK_DL_TX:
+		strlcpy(stream_name, "Voice Downlink Playback", 80);
+		goto register_voice_playback;
 	case VOICE_PLAYBACK_TX:
 		strlcpy(stream_name, "Voice Farend Playback", 80);
 		goto register_voice_playback;
@@ -6603,6 +6693,9 @@ static int msm_dai_q6_tdm_set_tdm_slot(struct snd_soc_dai *dai,
 
 	/* HW supports 1-32 slots configuration. Typical: 1, 2, 4, 8, 16, 32 */
 	switch (slots) {
+	case 1:
+		cap_mask = 0x01;
+		break;
 	case 2:
 		cap_mask = 0x03;
 		break;
@@ -6878,6 +6971,31 @@ static int msm_dai_q6_tdm_set_channel_map(struct snd_soc_dai *dai,
 	return rc;
 }
 
+static unsigned int tdm_param_set_slot_mask(u16 *slot_offset, int slot_width,
+						int slots_per_frame)
+{
+	unsigned int i = 0;
+	unsigned int slot_index = 0;
+	unsigned long slot_mask = 0;
+	unsigned int slot_width_bytes = slot_width / 8;
+
+	for (i = 0; i < AFE_PORT_MAX_AUDIO_CHAN_CNT; i++) {
+		if (slot_offset[i] != AFE_SLOT_MAPPING_OFFSET_INVALID) {
+			slot_index = slot_offset[i] / slot_width_bytes;
+			if (slot_index < slots_per_frame)
+				set_bit(slot_index, &slot_mask);
+			else {
+				pr_err("%s: invalid slot map setting\n",
+				       __func__);
+				return 0;
+			}
+		} else
+			break;
+	}
+
+	return slot_mask;
+}
+
 static int msm_dai_q6_tdm_hw_params(struct snd_pcm_substream *substream,
 				struct snd_pcm_hw_params *params,
 				struct snd_soc_dai *dai)
@@ -6966,7 +7084,9 @@ static int msm_dai_q6_tdm_hw_params(struct snd_pcm_substream *substream,
 	 */
 	tdm->nslots_per_frame = tdm_group->nslots_per_frame;
 	tdm->slot_width = tdm_group->slot_width;
-	tdm->slot_mask = tdm_group->slot_mask;
+	tdm->slot_mask = tdm_param_set_slot_mask(slot_mapping->offset,
+				tdm_group->slot_width,
+				tdm_group->nslots_per_frame);
 
 	pr_debug("%s: TDM:\n"
 		"num_channels=%d sample_rate=%d bit_width=%d\n"

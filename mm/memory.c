@@ -140,19 +140,20 @@ static int __init init_zero_pfn(void)
 core_initcall(init_zero_pfn);
 
 /*
- * This threshold is the boundary in the value space, that the counter has to
- * advance before we trace it. Should be a power of 2. It is to reduce unwanted
- * trace overhead. The counter is number of pages.
+ * Only trace rss_stat when there is a 512kb cross over.
+ * Smaller changes may be lost unless every small change is
+ * crossing into or returning to a 512kb boundary.
  */
 #define TRACE_MM_COUNTER_THRESHOLD 128
 
-void mm_trace_rss_stat(int member, long count, long value)
+void mm_trace_rss_stat(struct mm_struct *mm, int member, long count,
+		       long value)
 {
 	long thresh_mask = ~(TRACE_MM_COUNTER_THRESHOLD - 1);
 
 	/* Threshold roll-over, trace it */
 	if ((count & thresh_mask) != ((count - value) & thresh_mask))
-		trace_rss_stat(member, count);
+		trace_rss_stat(mm, member, count);
 }
 
 #if defined(SPLIT_RSS_COUNTING)

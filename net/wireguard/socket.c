@@ -333,6 +333,7 @@ static int wg_receive(struct sock *sk, struct sk_buff *skb)
 	wg = sk->sk_user_data;
 	if (unlikely(!wg))
 		goto err;
+	skb_mark_not_on_list(skb);
 	wg_packet_receive(wg, skb);
 	return 0;
 
@@ -431,7 +432,6 @@ void wg_socket_reinit(struct wg_device *wg, struct sock *new4,
 		wg->incoming_port = ntohs(inet_sk(new4)->inet_sport);
 	mutex_unlock(&wg->socket_update_lock);
 	synchronize_rcu();
-	synchronize_net();
 	sock_free(old4);
 	sock_free(old6);
 }

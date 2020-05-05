@@ -1114,15 +1114,16 @@ static int cam_ife_hw_mgr_acquire_res_ife_csid_rdi(
 
 	for (i = 0; i < in_port->num_out_res; i++) {
 		out_port = &in_port->data[i];
-		if (!cam_ife_hw_mgr_is_rdi_res(out_port->res_type))
+		
+	if (!cam_ife_hw_mgr_is_rdi_res(out_port->res_type)) {
 			continue;
-
+	}
 			/* get cid resource */
 			rc = cam_ife_mgr_acquire_cid_res(ife_ctx,
 				in_port, &cid_res_id,
 				cam_ife_hw_mgr_get_ife_csid_rdi_res_type(
 				out_port->res_type));
-			if (rc) {
+		if (rc) {
 				CAM_ERR(CAM_ISP,
 					"Acquire IFE CID resource Failed");
 				goto err;

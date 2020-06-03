@@ -32,6 +32,8 @@
 #define CIRRUS_RX_TOPOLOGY 0x10000CCC
 #define CIRRUS_TX_TOPOLOGY 0x10001CCC
 
+#define CRUS_PARAM_TEMP_MAX_LENGTH 384
+
 static struct device *crus_sp_device;
 static atomic_t crus_sp_misc_usage_count;
 
@@ -1292,10 +1294,22 @@ static long crus_sp_shared_ioctl(struct file *f, unsigned int cmd,
 		goto exit;
 	}
 
+	if (size != sizeof(crus_sp_hdr)) {
+		pr_err("%s: the payload size is invalid", __func__);
+		result = -EINVAL;
+		goto exit;
+	}
+
 	/* Copy IOCTL header from usermode */
 	if (copy_from_user(&crus_sp_hdr, arg, size)) {
 		pr_err("%s: copy_from_user (struct) failed\n", __func__);
 		result = -EFAULT;
+		goto exit;
+	}
+
+	if (crus_sp_hdr.data_length > CRUS_PARAM_TEMP_MAX_LENGTH) {
+		pr_err("data_length(%d) invalid\n", crus_sp_hdr.data_length);
+		result = -EINVAL;
 		goto exit;
 	}
 
@@ -1382,12 +1396,19 @@ static long crus_sp_shared_ioctl(struct file *f, unsigned int cmd,
 
 		break;
 	case CRUS_SP_IOCTL_SET_CALIB:
+		if (bufsize != sizeof(crus_sp_cal_rslt)) {
+			pr_err("%s: the data size is invalid", __func__);
+			result = -EINVAL;
+			goto exit_io;
+		}
+
 		if (copy_from_user(io_data,
 				   (void *)crus_sp_hdr.data, bufsize)) {
 			pr_err("%s: copy_from_user failed\n", __func__);
 			result = -EFAULT;
 			goto exit_io;
 		}
+
 		memcpy(&crus_sp_cal_rslt, io_data, bufsize);
 
 		msm_crus_check_calibration_value();
@@ -1412,12 +1433,47 @@ static long crus_sp_ioctl(struct file *f,
 	return crus_sp_shared_ioctl(f, cmd, (void __user *)arg);
 }
 
+struct compat_crus_sp_ioctl_header {
+	uint32_t size;
+	uint32_t module_id;
+	uint32_t param_id;
+	uint32_t data_length;
+	compat_caddr_t data;
+};
+
 static long crus_sp_compat_ioctl(struct file *f,
 				 unsigned int cmd, unsigned long arg)
 {
 	unsigned int cmd64;
+	struct compat_crus_sp_ioctl_header __user *ua32;
+	struct crus_sp_ioctl_header __user *ua;
+	compat_caddr_t __user ua32_data;
+	void __user *ua_data;
+	uint32_t ua32_size, ua_size;
 
 	pr_info("%s\n", __func__);
+
+	ua32 = compat_ptr(arg);
+	if (get_user(ua32_size, (uint32_t __user*)&ua32->size))
+		return -EFAULT;
+	if (ua32_size != sizeof(*ua32))
+		return -EINVAL;
+
+	ua_size = sizeof(*ua);
+	ua = compat_alloc_user_space(ua_size);
+	if (!ua)
+		return -ENOMEM;
+
+	/* Copy everything but data, then fixup size & data. */
+	if (copy_in_user(ua, ua32, sizeof(*ua32) - sizeof(ua32->data)))
+		return -EFAULT;
+	if (put_user(ua_size, (uint32_t __user*)&ua->size))
+		return -EFAULT;
+	if (get_user(ua32_data, (compat_caddr_t __user*)&ua32->data))
+		return -EFAULT;
+	ua_data = compat_ptr(ua32_data);
+	if (put_user(ua_data, (void* __user*)&ua->data))
+		return -EFAULT;
 
 	switch (cmd) {
 	case CRUS_SP_IOCTL_GET32:
@@ -1437,7 +1493,7 @@ static long crus_sp_compat_ioctl(struct file *f,
 		return -EINVAL;
 	}
 
-	return crus_sp_shared_ioctl(f, cmd64, compat_ptr(arg));
+	return crus_sp_shared_ioctl(f, cmd64, ua);
 }
 
 static int crus_sp_open(struct inode *inode, struct file *f)

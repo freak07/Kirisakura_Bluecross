@@ -248,6 +248,7 @@
 #define RT5514_FIRMWARE3	"rt5514_dsp_fw3.bin"
 #define RT5514_FIRMWARE4	"rt5514_dsp_fw4.bin"
 
+#define AMBIENT_COMMON_MAX_PAYLOAD_BUFFER_SIZE (128)
 #define BUFFER_SIZE 10
 
 /* System Clock Source */
@@ -261,6 +262,12 @@ enum {
 	RT5514_PLL1_S_MCLK,
 	RT5514_PLL1_S_BCLK,
 };
+
+typedef struct _payload_st {
+	unsigned int size;
+	unsigned int status;
+	char data[AMBIENT_COMMON_MAX_PAYLOAD_BUFFER_SIZE];
+} RT5514_PAYLOAD;
 
 struct rt5514_priv {
 	struct rt5514_platform_data pdata;
@@ -279,6 +286,7 @@ struct rt5514_priv {
 	unsigned int hotword_model_len, musdet_model_len;
 	unsigned int pll3_cal_value;
 	int codec_state;
+	RT5514_PAYLOAD payload;
 };
 
 enum {

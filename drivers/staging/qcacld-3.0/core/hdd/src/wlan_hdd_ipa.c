@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2019 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -655,6 +655,7 @@ static int hdd_ipa_uc_enable_pipes(struct hdd_ipa_priv *hdd_ipa);
 static int hdd_ipa_wdi_init(struct hdd_ipa_priv *hdd_ipa);
 static void hdd_ipa_send_pkt_to_tl(struct hdd_ipa_iface_context *iface_context,
 		struct ipa_rx_data *ipa_tx_desc);
+static int hdd_ipa_setup_sys_pipe(struct hdd_ipa_priv *hdd_ipa);
 
 /**
  * hdd_ipa_uc_get_db_paddr() - Get Doorbell physical address
@@ -3966,6 +3967,19 @@ static void hdd_ipa_uc_loaded_handler(struct hdd_ipa_priv *ipa_ctxt)
 	if (!pdev) {
 		HDD_IPA_LOG(QDF_TRACE_LEVEL_FATAL, "invalid txrx context");
 		return;
+	}
+
+	/* Setup IPA sys_pipe for MCC */
+	if (hdd_ipa_uc_sta_is_enabled(ipa_ctxt->hdd_ctx)) {
+		ret = hdd_ipa_setup_sys_pipe(ipa_ctxt);
+		if (ret) {
+			HDD_IPA_LOG(QDF_TRACE_LEVEL_ERROR,
+				    "ipa sys pipes setup failed ret=%d", ret);
+			return;
+		}
+
+		INIT_WORK(&ipa_ctxt->mcc_work,
+				hdd_ipa_mcc_work_handler);
 	}
 
 	/* Connect pipe */
@@ -7314,14 +7328,6 @@ static QDF_STATUS __hdd_ipa_init(hdd_context_t *hdd_ctx)
 		hdd_ipa->sta_connected = 0;
 		hdd_ipa->ipa_pipes_down = true;
 		hdd_ipa->wdi_enabled = false;
-		/* Setup IPA sys_pipe for MCC */
-		if (hdd_ipa_uc_sta_is_enabled(hdd_ipa->hdd_ctx)) {
-			ret = hdd_ipa_setup_sys_pipe(hdd_ipa);
-			if (ret)
-				goto fail_create_sys_pipe;
-
-			INIT_WORK(&hdd_ipa->mcc_work, hdd_ipa_mcc_work_handler);
-		}
 
 		ret = hdd_ipa_wdi_init(hdd_ipa);
 		if (ret) {
@@ -7329,15 +7335,25 @@ static QDF_STATUS __hdd_ipa_init(hdd_context_t *hdd_ctx)
 					"ipa wdi init failed ret=%d", ret);
 			if (ret == -EACCES) {
 				if (hdd_ipa_uc_send_wdi_control_msg(false))
-					goto fail_create_sys_pipe;
+					goto ipa_wdi_destroy;
 			} else {
-				goto fail_create_sys_pipe;
+				goto ipa_wdi_destroy;
+			}
+		} else {
+			/* Setup IPA sys_pipe for MCC */
+			if (hdd_ipa_uc_sta_is_enabled(hdd_ipa->hdd_ctx)) {
+				ret = hdd_ipa_setup_sys_pipe(hdd_ipa);
+				if (ret)
+					goto ipa_wdi_destroy;
+
+				INIT_WORK(&hdd_ipa->mcc_work,
+					  hdd_ipa_mcc_work_handler);
 			}
 		}
 	} else {
 		ret = hdd_ipa_setup_sys_pipe(hdd_ipa);
 		if (ret)
-			goto fail_create_sys_pipe;
+			goto ipa_wdi_destroy;
 	}
 
 	/* When IPA clock scaling is disabled, initialze maximum clock */
@@ -7349,14 +7365,14 @@ static QDF_STATUS __hdd_ipa_init(hdd_context_t *hdd_ctx)
 				IPA_CLIENT_WLAN1_CONS, HDD_IPA_MAX_BANDWIDTH);
 		if (ret) {
 			hdd_err("RM CONS set perf profile failed: %d", ret);
-			goto fail_create_sys_pipe;
+			goto ipa_wdi_destroy;
 		}
 
 		ret = hdd_ipa_wdi_rm_set_perf_profile(hdd_ipa,
 				IPA_CLIENT_WLAN1_PROD, HDD_IPA_MAX_BANDWIDTH);
 		if (ret) {
 			hdd_err("RM PROD set perf profile failed: %d", ret);
-			goto fail_create_sys_pipe;
+			goto ipa_wdi_destroy;
 		}
 	}
 
@@ -7365,7 +7381,7 @@ static QDF_STATUS __hdd_ipa_init(hdd_context_t *hdd_ctx)
 	HDD_IPA_LOG(QDF_TRACE_LEVEL_DEBUG, "exit: success");
 	return QDF_STATUS_SUCCESS;
 
-fail_create_sys_pipe:
+ipa_wdi_destroy:
 	hdd_ipa_wdi_destroy_rm(hdd_ipa);
 fail_setup_rm:
 	qdf_spinlock_destroy(&hdd_ipa->pm_lock);

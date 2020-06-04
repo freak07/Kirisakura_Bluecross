@@ -282,6 +282,9 @@ struct rt5514_priv {
 	int pll_in;
 	int pll_out;
 	int dsp_enabled, dsp_test;
+	const struct firmware *fw[4];
+	char *fw_name[4];
+	unsigned int fw_addr[4];
 	u8 *hotword_model_buf, *musdet_model_buf;
 	unsigned int hotword_model_len, musdet_model_len;
 	unsigned int pll3_cal_value;

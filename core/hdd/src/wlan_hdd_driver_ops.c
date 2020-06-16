@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015-2018,2020 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -413,12 +413,12 @@ static int wlan_hdd_probe(struct device *dev, void *bdev, const struct hif_bus_i
 		goto err_hdd_deinit;
 
 
+	hdd_start_complete(0);
 	if (reinit) {
 		cds_set_recovery_in_progress(false);
 	} else {
 		cds_set_load_in_progress(false);
 		cds_set_driver_loaded(true);
-		hdd_start_complete(0);
 	}
 
 	hdd_allow_suspend(WIFI_POWER_EVENT_WAKELOCK_DRIVER_INIT);
@@ -449,6 +449,7 @@ err_init_qdf_ctx:
 	hdd_remove_pm_qos(dev);
 
 	hdd_stop_driver_ops_timer();
+	hdd_start_complete(0);
 	mutex_unlock(&hdd_init_deinit_lock);
 	return check_for_probe_defer(ret);
 }

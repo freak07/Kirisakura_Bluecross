@@ -78,9 +78,6 @@ struct bio {
 	*/
 	struct inode            *bi_dio_inode;
 #endif
-#ifdef CONFIG_DM_DEFAULT_KEY
-	int bi_crypt_skip;
-#endif
 
 	unsigned short		bi_vcnt;	/* how many bio_vec's */
 

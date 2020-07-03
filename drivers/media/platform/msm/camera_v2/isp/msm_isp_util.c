@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -408,8 +408,12 @@ static int msm_isp_start_fetch_engine_multi_pass(struct vfe_device *vfe_dev,
 			pr_err("%s: Fetch engine config failed\n", __func__);
 			return -EINVAL;
 		}
-		for (i = 0; i < stream_info->num_planes; i++)
+		for (i = 0; i < stream_info->num_planes; i++) {
+			vfe_dev->hw_info->vfe_ops.axi_ops.enable_wm(
+				vfe_dev->vfe_base,
+				stream_info->wm[vfe_idx][i], 1);
 			wm_reload_mask |= (1 << stream_info->wm[vfe_idx][i]);
+		}
 		vfe_dev->hw_info->vfe_ops.core_ops.reg_update(vfe_dev,
 			VFE_SRC_MAX);
 		vfe_dev->hw_info->vfe_ops.axi_ops.reload_wm(vfe_dev,
@@ -1029,6 +1033,17 @@ static long msm_isp_ioctl_unlocked(struct v4l2_subdev *sd,
 		break;
 	case VIDIOC_MSM_ISP_SMMU_ATTACH:
 		mutex_lock(&vfe_dev->core_mutex);
+		if (adsp_shmem_get_state() != CAMERA_STATUS_END) {
+			pr_debug("Stop adsp camera\n");  /* execute stop cmd */
+			wmb(); /* sync memory access with ADSP */
+			adsp_shmem_set_state(CAMERA_STATUS_STOP);
+			wmb(); /* sync memory access with ADSP */
+			usleep_range(1000, 1100);
+			rmb(); /* sync memory access with ADSP */
+			while (adsp_shmem_get_state() != CAMERA_STATUS_END)
+				rmb(); /* sync memory access with ADSP */
+		}
+
 		rc = msm_isp_smmu_attach(vfe_dev->buf_mgr, arg);
 		mutex_unlock(&vfe_dev->core_mutex);
 		break;
@@ -2093,6 +2108,9 @@ static void msm_isp_enqueue_tasklet_cmd(struct vfe_device *vfe_dev,
 		return;
 	}
 	atomic_add(1, &vfe_dev->irq_cnt);
+	trace_msm_cam_isp_status_dump("VFE_IRQ:", vfe_dev->pdev->id,
+		vfe_dev->axi_data.src_info[VFE_PIX_0].frame_id,
+		irq_status0, irq_status1);
 	queue_cmd->vfeInterruptStatus0 = irq_status0;
 	queue_cmd->vfeInterruptStatus1 = irq_status1;
 	msm_isp_get_timestamp(&queue_cmd->ts, vfe_dev);
@@ -2188,6 +2206,9 @@ void msm_isp_do_tasklet(unsigned long data)
 		atomic_sub(1, &vfe_dev->irq_cnt);
 		msm_isp_prepare_tasklet_debug_info(vfe_dev,
 			irq_status0, irq_status1, ts);
+		trace_msm_cam_isp_status_dump("VFE_TASKLET:", vfe_dev->pdev->id,
+			vfe_dev->axi_data.src_info[VFE_PIX_0].frame_id,
+			irq_status0, irq_status1);
 		irq_ops = &vfe_dev->hw_info->vfe_ops.irq_ops;
 		irq_ops->process_reset_irq(vfe_dev,
 			irq_status0, irq_status1);
@@ -2289,7 +2310,7 @@ int msm_isp_open_node(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 	vfe_dev->isp_raw0_debug = 0;
 	vfe_dev->isp_raw1_debug = 0;
 	vfe_dev->isp_raw2_debug = 0;
-
+	vfe_dev->irq_sof_id = 0;
 	if (vfe_dev->hw_info->vfe_ops.core_ops.init_hw(vfe_dev) < 0) {
 		pr_err("%s: init hardware failed\n", __func__);
 		vfe_dev->vfe_open_cnt--;
@@ -2301,7 +2322,8 @@ int msm_isp_open_node(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 	memset(&vfe_dev->error_info, 0, sizeof(vfe_dev->error_info));
 	atomic_set(&vfe_dev->error_info.overflow_state, NO_OVERFLOW);
 
-	vfe_dev->hw_info->vfe_ops.core_ops.clear_status_reg(vfe_dev);
+	if (!vfe_used_by_adsp(vfe_dev))
+		vfe_dev->hw_info->vfe_ops.core_ops.clear_status_reg(vfe_dev);
 
 	vfe_dev->vfe_hw_version = msm_camera_io_r(vfe_dev->vfe_base);
 	ISP_DBG("%s: HW Version: 0x%x\n", __func__, vfe_dev->vfe_hw_version);
@@ -2395,18 +2417,22 @@ int msm_isp_close_node(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 	if (rc <= 0)
 		pr_err("%s: halt timeout rc=%ld\n", __func__, rc);
 
-	vfe_dev->hw_info->vfe_ops.core_ops.
+	if (!vfe_used_by_adsp(vfe_dev)) {
+		vfe_dev->hw_info->vfe_ops.core_ops.
 		update_camif_state(vfe_dev, DISABLE_CAMIF_IMMEDIATELY);
+	}
 	vfe_dev->hw_info->vfe_ops.core_ops.reset_hw(vfe_dev, 0, 0);
 
-	/* put scratch buf in all the wm */
-	for (wm = 0; wm < vfe_dev->axi_data.hw_info->num_wm; wm++) {
-		msm_isp_cfg_wm_scratch(vfe_dev, wm, VFE_PING_FLAG);
-		msm_isp_cfg_wm_scratch(vfe_dev, wm, VFE_PONG_FLAG);
-	}
-	vfe_dev->hw_info->vfe_ops.core_ops.release_hw(vfe_dev);
 	/* after regular hw stop, reduce open cnt */
 	vfe_dev->vfe_open_cnt--;
+
+	if (!vfe_used_by_adsp(vfe_dev)) {
+		for (wm = 0; wm < vfe_dev->axi_data.hw_info->num_wm; wm++) {
+			msm_isp_cfg_wm_scratch(vfe_dev, wm, VFE_PING_FLAG);
+			msm_isp_cfg_wm_scratch(vfe_dev, wm, VFE_PONG_FLAG);
+		}
+		vfe_dev->hw_info->vfe_ops.core_ops.release_hw(vfe_dev);
+	}
 	vfe_dev->buf_mgr->ops->buf_mgr_deinit(vfe_dev->buf_mgr);
 	if (vfe_dev->vt_enable) {
 		msm_isp_end_avtimer();

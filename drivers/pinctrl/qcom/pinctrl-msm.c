@@ -635,6 +635,7 @@ static void msm_gpio_irq_enable(struct irq_data *d)
 static void msm_gpio_irq_unmask(struct irq_data *d)
 {
 	struct gpio_chip *gc = irq_data_get_irq_chip_data(d);
+	uint32_t irqtype = irqd_get_trigger_type(d);
 	struct msm_pinctrl *pctrl = gpiochip_get_data(gc);
 	const struct msm_pingroup *g;
 	unsigned long flags;
@@ -643,6 +644,12 @@ static void msm_gpio_irq_unmask(struct irq_data *d)
 	g = &pctrl->soc->groups[d->hwirq];
 
 	spin_lock_irqsave(&pctrl->lock, flags);
+
+	if (irqtype & (IRQF_TRIGGER_HIGH | IRQF_TRIGGER_LOW)) {
+		val = readl_relaxed(pctrl->regs + g->intr_status_reg);
+		val &= ~BIT(g->intr_status_bit);
+		writel_relaxed(val, pctrl->regs + g->intr_status_reg);
+	}
 
 	val = readl(pctrl->regs + g->intr_cfg_reg);
 	val |= BIT(g->intr_enable_bit);
@@ -984,6 +991,59 @@ static void gpio_muxed_to_pdc(struct irq_domain *pdc_domain, struct irq_data *d)
 		/* We have no more PDC port available */
 		WARN_ON(j == pctrl->soc->n_pdc_mux_out);
 	}
+}
+
+static bool is_gpio_tlmm_dc(struct irq_data *d, u32 type)
+{
+	const struct msm_pingroup *g;
+	unsigned long flags;
+	struct gpio_chip *gc = irq_data_get_irq_chip_data(d);
+	struct msm_pinctrl *pctrl;
+	bool ret = false;
+	unsigned int polarity = 0, offset, val;
+	int i;
+
+	if (!gc)
+		return false;
+
+	pctrl = gpiochip_get_data(gc);
+
+	for (i = 0; i < pctrl->soc->n_dir_conns; i++) {
+		struct msm_dir_conn *dir_conn = (struct msm_dir_conn *)
+			&pctrl->soc->dir_conn[i];
+
+		if (dir_conn->gpio == d->hwirq && dir_conn->tlmm_dc) {
+			ret = true;
+			offset = pctrl->soc->dir_conn_irq_base -
+				dir_conn->hwirq;
+			break;
+		}
+	}
+
+	if (!ret)
+		return ret;
+
+	if (type & (IRQ_TYPE_EDGE_FALLING | IRQ_TYPE_LEVEL_LOW))
+		return ret;
+
+	/*
+	 * Since the default polarity is set to 0, change it to 1 for
+	 * Rising edge and active high interrupt type such that the line
+	 * is not inverted.
+	 */
+	polarity = 1;
+
+	spin_lock_irqsave(&pctrl->lock, flags);
+	g = &pctrl->soc->groups[d->hwirq];
+
+	val = readl_relaxed(pctrl->regs + g->dir_conn_reg + (offset * 4));
+	val |= polarity << 8;
+
+	writel_relaxed(val, pctrl->regs + g->dir_conn_reg + (offset * 4));
+
+	spin_unlock_irqrestore(&pctrl->lock, flags);
+
+	return ret;
 }
 
 static bool is_gpio_dual_edge(struct irq_data *d, irq_hw_number_t *dir_conn_irq)
@@ -1329,12 +1389,12 @@ static int msm_dirconn_irq_set_type(struct irq_data *d, unsigned int type)
 
 	pctrl = gpiochip_get_data(gc);
 
-	if (type == IRQ_TYPE_EDGE_BOTH) {
+	if (type == IRQ_TYPE_EDGE_BOTH)
 		add_dirconn_tlmm(d, irq);
-	} else {
-		if (is_gpio_dual_edge(d, &irq))
-			remove_dirconn_tlmm(d, irq);
-	}
+	else if (is_gpio_dual_edge(d, &irq))
+		remove_dirconn_tlmm(d, irq);
+	else if (is_gpio_tlmm_dc(d, type))
+		type = IRQ_TYPE_EDGE_RISING;
 
 	/*
 	 * Shared SPI config for Edge is 0 and
@@ -1437,9 +1497,28 @@ static void msm_gpio_setup_dir_connects(struct msm_pinctrl *pctrl)
 
 	for (i = 0; i < pctrl->soc->n_dir_conns; i++) {
 		const struct msm_dir_conn *dirconn = &pctrl->soc->dir_conn[i];
+		struct irq_data *d;
 
 		request_dc_interrupt(pctrl->chip.irqdomain, pdc_domain,
 					dirconn->hwirq, dirconn->gpio);
+
+		if (!dirconn->gpio)
+			continue;
+
+		if (!dirconn->tlmm_dc)
+			continue;
+
+		/*
+		 * If the gpio is routed through TLMM direct connect interrupts,
+		 * program the TLMM registers for this setup.
+		 */
+		d = irq_get_irq_data(irq_find_mapping(pctrl->chip.irqdomain,
+					dirconn->gpio));
+		if (!d)
+			continue;
+
+		msm_dirconn_cfg_reg(d, pctrl->soc->dir_conn_irq_base
+					- (u32)dirconn->hwirq);
 	}
 
 	for (i = 0; i < pctrl->soc->n_pdc_mux_out; i++) {
@@ -1454,7 +1533,7 @@ static void msm_gpio_setup_dir_connects(struct msm_pinctrl *pctrl)
 	 * Statically choose the GPIOs for mapping to PDC. Dynamic mux mapping
 	 * is very difficult.
 	 */
-	for (i = 0; i < pctrl->soc->n_pdc_mux_out; i++) {
+	for (i = 0; i < pctrl->soc->n_gpio_mux_in; i++) {
 		unsigned int irq;
 		struct irq_data *d;
 		struct msm_gpio_mux_input *gpio_in =
@@ -1474,6 +1553,12 @@ static void msm_gpio_setup_dir_connects(struct msm_pinctrl *pctrl)
 static int msm_gpiochip_to_irq(struct gpio_chip *chip, unsigned int offset)
 {
 	struct irq_fwspec fwspec;
+	struct irq_domain *domain = chip->irqdomain;
+	int virq;
+
+	virq = irq_find_mapping(domain, offset);
+	if (virq)
+		return virq;
 
 	fwspec.fwnode = of_node_to_fwnode(chip->of_node);
 	fwspec.param[0] = offset;

@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2018 The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2019 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -56,12 +56,12 @@
 
 
 #define IPA_MHI_FUNC_ENTRY() \
-	IPA_MHI_DBG_LOW("ENTRY\n")
+	IPA_MHI_DBG("ENTRY\n")
 #define IPA_MHI_FUNC_EXIT() \
-	IPA_MHI_DBG_LOW("EXIT\n")
+	IPA_MHI_DBG("EXIT\n")
 
 #define IPA_MHI_MAX_UL_CHANNELS 1
-#define IPA_MHI_MAX_DL_CHANNELS 1
+#define IPA_MHI_MAX_DL_CHANNELS 2
 
 /* bit #40 in address should be asserted for MHI transfers over pcie */
 #define IPA_MHI_HOST_ADDR_COND(addr) \
@@ -198,6 +198,8 @@ static int ipa_mhi_start_gsi_channel(enum ipa_client_type client,
 	union __packed gsi_channel_scratch ch_scratch;
 	struct ipa3_ep_context *ep;
 	const struct ipa_gsi_ep_config *ep_cfg;
+	bool burst_mode_enabled = false;
+	struct ipa_ep_cfg_ctrl ep_cfg_ctrl;
 
 	IPA_MHI_FUNC_ENTRY();
 
@@ -280,8 +282,23 @@ static int ipa_mhi_start_gsi_channel(enum ipa_client_type client,
 	ch_props.ring_len = params->ch_ctx_host->rlen;
 	ch_props.ring_base_addr = IPA_MHI_HOST_ADDR_COND(
 			params->ch_ctx_host->rbase);
-	ch_props.use_db_eng = GSI_CHAN_DB_MODE;
+
+	/* Burst mode is not supported on DPL pipes */
+	if ((client != IPA_CLIENT_MHI_DPL_CONS) &&
+		(params->ch_ctx_host->brstmode == IPA_MHI_BURST_MODE_DEFAULT ||
+		params->ch_ctx_host->brstmode == IPA_MHI_BURST_MODE_ENABLE)) {
+		burst_mode_enabled = true;
+	}
+
+	if (ipa3_ctx->ipa_hw_type >= IPA_HW_v4_0 &&
+		!burst_mode_enabled)
+		ch_props.use_db_eng = GSI_CHAN_DIRECT_MODE;
+	else
+		ch_props.use_db_eng = GSI_CHAN_DB_MODE;
+
 	ch_props.max_prefetch = GSI_ONE_PREFETCH_SEG;
+	ch_props.prefetch_mode =
+		ipa_get_ep_prefetch_mode(client);
 	ch_props.low_weight = 1;
 	ch_props.err_cb = params->ch_err_cb;
 	ch_props.chan_user_data = params->channel;
@@ -307,9 +324,9 @@ static int ipa_mhi_start_gsi_channel(enum ipa_client_type client,
 		ch_scratch.mhi.outstanding_threshold = 0;
 	}
 	ch_scratch.mhi.oob_mod_threshold = 4;
-	if (params->ch_ctx_host->brstmode == IPA_MHI_BURST_MODE_DEFAULT ||
-		params->ch_ctx_host->brstmode == IPA_MHI_BURST_MODE_ENABLE) {
-		ch_scratch.mhi.burst_mode_enabled = true;
+
+	if (burst_mode_enabled) {
+		ch_scratch.mhi.burst_mode_enabled = burst_mode_enabled;
 		ch_scratch.mhi.polling_configuration =
 			ipa3_mhi_get_ch_poll_cfg(client, params->ch_ctx_host,
 				(ch_props.ring_len / ch_props.re_size));
@@ -326,6 +343,20 @@ static int ipa_mhi_start_gsi_channel(enum ipa_client_type client,
 	}
 
 	*params->mhi = ch_scratch.mhi;
+
+	if (IPA_CLIENT_IS_PROD(ep->client) && ep->skip_ep_cfg) {
+		memset(&ep_cfg_ctrl, 0, sizeof(struct ipa_ep_cfg_ctrl));
+		ep_cfg_ctrl.ipa_ep_delay = true;
+		ep->ep_delay_set = true;
+		res = ipa3_cfg_ep_ctrl(ipa_ep_idx, &ep_cfg_ctrl);
+		if (res)
+			IPA_MHI_ERR("client (ep: %d) failed result=%d\n",
+			ipa_ep_idx, res);
+		else
+			IPA_MHI_DBG("client (ep: %d) success\n", ipa_ep_idx);
+	} else {
+		ep->ep_delay_set = false;
+	}
 
 	IPA_MHI_DBG("Starting channel\n");
 	res = gsi_start_channel(ep->gsi_chan_hdl);
@@ -352,6 +383,7 @@ int ipa3_mhi_init_engine(struct ipa_mhi_init_engine *params)
 	int res;
 	struct gsi_device_scratch gsi_scratch;
 	const struct ipa_gsi_ep_config *gsi_ep_info;
+	u32 ipa_mhi_max_ul_channels, ipa_mhi_max_dl_channels;
 
 	IPA_MHI_FUNC_ENTRY();
 
@@ -360,7 +392,16 @@ int ipa3_mhi_init_engine(struct ipa_mhi_init_engine *params)
 		return -EINVAL;
 	}
 
-	if ((IPA_MHI_MAX_UL_CHANNELS + IPA_MHI_MAX_DL_CHANNELS) >
+	ipa_mhi_max_ul_channels = IPA_MHI_MAX_UL_CHANNELS;
+	ipa_mhi_max_dl_channels = IPA_MHI_MAX_DL_CHANNELS;
+
+	/* In case of Auto-pcie config, MHI2_PROD and MHI2_CONS is used */
+	if (ipa3_ctx->ipa_config_is_auto == true) {
+		ipa_mhi_max_ul_channels++;
+		ipa_mhi_max_dl_channels++;
+	}
+
+	if ((ipa_mhi_max_ul_channels + ipa_mhi_max_dl_channels) >
 		((ipa3_ctx->mhi_evid_limits[1] -
 		ipa3_ctx->mhi_evid_limits[0]) + 1)) {
 		IPAERR("Not enough event rings for MHI\n");
@@ -510,6 +551,7 @@ int ipa3_disconnect_mhi_pipe(u32 clnt_hdl)
 {
 	struct ipa3_ep_context *ep;
 	int res;
+	struct ipa_ep_cfg_ctrl ep_cfg_ctrl;
 
 	IPA_MHI_FUNC_ENTRY();
 
@@ -524,6 +566,21 @@ int ipa3_disconnect_mhi_pipe(u32 clnt_hdl)
 	}
 
 	ep = &ipa3_ctx->ep[clnt_hdl];
+	if (ep->ep_delay_set == true) {
+		memset(&ep_cfg_ctrl, 0, sizeof(struct ipa_ep_cfg_ctrl));
+		ep_cfg_ctrl.ipa_ep_delay = false;
+		res = ipa3_cfg_ep_ctrl(clnt_hdl,
+			&ep_cfg_ctrl);
+		if (res) {
+			IPAERR
+			("client(ep:%d) failed to remove delay res=%d\n",
+				clnt_hdl, res);
+		} else {
+			IPADBG("client (ep: %d) delay removed\n",
+				clnt_hdl);
+			ep->ep_delay_set = false;
+		}
+	}
 
 	res = gsi_dealloc_channel(ep->gsi_chan_hdl);
 	if (res) {
@@ -549,6 +606,7 @@ int ipa3_mhi_resume_channels_internal(enum ipa_client_type client,
 	int res;
 	int ipa_ep_idx;
 	struct ipa3_ep_context *ep;
+	union __packed gsi_channel_scratch gsi_ch_scratch;
 
 	IPA_MHI_FUNC_ENTRY();
 
@@ -563,11 +621,34 @@ int ipa3_mhi_resume_channels_internal(enum ipa_client_type client,
 		/*
 		 * set polling mode bit to DB mode before
 		 * resuming the channel
+		 *
+		 * For MHI-->IPA pipes:
+		 * when resuming due to transition to M0,
+		 * set the polling mode bit to 0.
+		 * In other cases, restore it's value form
+		 * when you stopped the channel.
+		 * Here, after successful resume client move to M0 state.
+		 * So, by default setting polling mode bit to 0.
+		 *
+		 * For IPA-->MHI pipe:
+		 * always restore the polling mode bit.
 		 */
-		res = gsi_write_channel_scratch(
-			ep->gsi_chan_hdl, ch_scratch);
+
+		res = gsi_read_channel_scratch(
+			ep->gsi_chan_hdl, &gsi_ch_scratch);
 		if (res) {
-			IPA_MHI_ERR("write ch scratch fail %d\n"
+			IPA_MHI_ERR("Read ch scratch fail %d\n"
+				, res);
+			return res;
+		}
+
+		if (IPA_CLIENT_IS_PROD(client))
+			gsi_ch_scratch.mhi.polling_mode = false;
+
+		res = gsi_write_channel_scratch(
+			ep->gsi_chan_hdl, gsi_ch_scratch);
+		if (res) {
+			IPA_MHI_ERR("Write ch scratch fail %d\n"
 				, res);
 			return res;
 		}

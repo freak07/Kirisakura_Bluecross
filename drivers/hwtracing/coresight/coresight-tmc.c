@@ -1,4 +1,4 @@
-/* Copyright (c) 2012, 2017-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012, 2017-2019, The Linux Foundation. All rights reserved.
  *
  * Description: CoreSight Trace Memory Controller driver
  *
@@ -139,7 +139,6 @@ static void __tmc_reg_dump(struct tmc_drvdata *drvdata)
 void tmc_enable_hw(struct tmc_drvdata *drvdata)
 {
 	drvdata->enable = true;
-	drvdata->sticky_enable = true;
 	writel_relaxed(TMC_CTL_CAPT_EN, drvdata->base + TMC_CTL);
 	if (drvdata->force_reg_dump)
 		__tmc_reg_dump(drvdata);
@@ -155,7 +154,7 @@ static int tmc_read_prepare(struct tmc_drvdata *drvdata)
 {
 	int ret = 0;
 
-	if (!drvdata->sticky_enable)
+	if (!drvdata->enable)
 		return -EPERM;
 
 	switch (drvdata->config_type) {
@@ -469,6 +468,8 @@ static ssize_t out_mode_store(struct device *dev,
 
 		coresight_cti_unmap_trigout(drvdata->cti_flush, 3, 0);
 		coresight_cti_unmap_trigin(drvdata->cti_reset, 2, 0);
+
+		tmc_etr_byte_cntr_stop(drvdata->byte_cntr);
 
 		drvdata->usbch = usb_qdss_open("qdss", drvdata,
 					       usb_notifier);

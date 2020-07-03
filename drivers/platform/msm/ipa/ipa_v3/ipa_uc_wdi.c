@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2018, 2020 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -756,16 +756,21 @@ int ipa3_connect_wdi_pipe(struct ipa_wdi_in_params *in,
 		return -EINVAL;
 	}
 
-	if (IPA_CLIENT_IS_CONS(in->sys.client)) {
-		if (in->u.dl.comp_ring_base_pa % IPA_WDI_RING_ALIGNMENT ||
-			in->u.dl.ce_ring_base_pa % IPA_WDI_RING_ALIGNMENT) {
-			IPAERR("alignment failure on TX\n");
-			return -EINVAL;
-		}
-	} else {
-		if (in->u.ul.rdy_ring_base_pa % IPA_WDI_RING_ALIGNMENT) {
-			IPAERR("alignment failure on RX\n");
-			return -EINVAL;
+	if (!in->smmu_enabled) {
+		if (IPA_CLIENT_IS_CONS(in->sys.client)) {
+			if (in->u.dl.comp_ring_base_pa %
+				IPA_WDI_RING_ALIGNMENT ||
+				in->u.dl.ce_ring_base_pa %
+				IPA_WDI_RING_ALIGNMENT) {
+				IPAERR("alignment failure on TX\n");
+					return -EINVAL;
+			}
+		} else {
+			if (in->u.ul.rdy_ring_base_pa %
+				IPA_WDI_RING_ALIGNMENT) {
+				IPAERR("alignment failure on RX\n");
+				return -EINVAL;
+			}
 		}
 	}
 
@@ -795,43 +800,73 @@ int ipa3_connect_wdi_pipe(struct ipa_wdi_in_params *in,
 			cmd.size = sizeof(*tx_2);
 		else
 			cmd.size = sizeof(*tx);
-		IPADBG("comp_ring_base_pa=0x%pa\n",
-				&in->u.dl.comp_ring_base_pa);
-		IPADBG("comp_ring_size=%d\n", in->u.dl.comp_ring_size);
-		IPADBG("ce_ring_base_pa=0x%pa\n", &in->u.dl.ce_ring_base_pa);
-		IPADBG("ce_ring_size=%d\n", in->u.dl.ce_ring_size);
-		IPADBG("ce_ring_doorbell_pa=0x%pa\n",
-				&in->u.dl.ce_door_bell_pa);
-		IPADBG("num_tx_buffers=%d\n", in->u.dl.num_tx_buffers);
+		if (in->smmu_enabled) {
+			IPADBG("comp_ring_size=%d\n",
+				in->u.dl_smmu.comp_ring_size);
+			IPADBG("ce_ring_size=%d\n", in->u.dl_smmu.ce_ring_size);
+			IPADBG("ce_ring_doorbell_pa=0x%pa\n",
+					&in->u.dl_smmu.ce_door_bell_pa);
+			IPADBG("num_tx_buffers=%d\n",
+				in->u.dl_smmu.num_tx_buffers);
+		} else {
+			IPADBG("comp_ring_base_pa=0x%pa\n",
+					&in->u.dl.comp_ring_base_pa);
+			IPADBG("comp_ring_size=%d\n", in->u.dl.comp_ring_size);
+			IPADBG("ce_ring_base_pa=0x%pa\n",
+				&in->u.dl.ce_ring_base_pa);
+			IPADBG("ce_ring_size=%d\n", in->u.dl.ce_ring_size);
+			IPADBG("ce_ring_doorbell_pa=0x%pa\n",
+					&in->u.dl.ce_door_bell_pa);
+			IPADBG("num_tx_buffers=%d\n", in->u.dl.num_tx_buffers);
+		}
 	} else {
 		if (ipa3_ctx->ipa_wdi2)
 			cmd.size = sizeof(*rx_2);
 		else
 			cmd.size = sizeof(*rx);
-		IPADBG("rx_ring_base_pa=0x%pa\n",
-			&in->u.ul.rdy_ring_base_pa);
-		IPADBG("rx_ring_size=%d\n",
-			in->u.ul.rdy_ring_size);
-		IPADBG("rx_ring_rp_pa=0x%pa\n",
-			&in->u.ul.rdy_ring_rp_pa);
-		IPADBG("rx_comp_ring_base_pa=0x%pa\n",
-			&in->u.ul.rdy_comp_ring_base_pa);
-		IPADBG("rx_comp_ring_size=%d\n",
-			in->u.ul.rdy_comp_ring_size);
-		IPADBG("rx_comp_ring_wp_pa=0x%pa\n",
-			&in->u.ul.rdy_comp_ring_wp_pa);
-		ipa3_ctx->uc_ctx.rdy_ring_base_pa =
-			in->u.ul.rdy_ring_base_pa;
-		ipa3_ctx->uc_ctx.rdy_ring_rp_pa =
-			in->u.ul.rdy_ring_rp_pa;
-		ipa3_ctx->uc_ctx.rdy_ring_size =
-			in->u.ul.rdy_ring_size;
-		ipa3_ctx->uc_ctx.rdy_comp_ring_base_pa =
-			in->u.ul.rdy_comp_ring_base_pa;
-		ipa3_ctx->uc_ctx.rdy_comp_ring_wp_pa =
-			in->u.ul.rdy_comp_ring_wp_pa;
-		ipa3_ctx->uc_ctx.rdy_comp_ring_size =
-			in->u.ul.rdy_comp_ring_size;
+		if (in->smmu_enabled) {
+			IPADBG("rx_ring_size=%d\n",
+				in->u.ul_smmu.rdy_ring_size);
+			IPADBG("rx_ring_rp_pa=0x%pa\n",
+				&in->u.ul_smmu.rdy_ring_rp_pa);
+			IPADBG("rx_comp_ring_size=%d\n",
+				in->u.ul_smmu.rdy_comp_ring_size);
+			IPADBG("rx_comp_ring_wp_pa=0x%pa\n",
+				&in->u.ul_smmu.rdy_comp_ring_wp_pa);
+			ipa3_ctx->uc_ctx.rdy_ring_rp_pa =
+				in->u.ul_smmu.rdy_ring_rp_pa;
+			ipa3_ctx->uc_ctx.rdy_ring_size =
+				in->u.ul_smmu.rdy_ring_size;
+			ipa3_ctx->uc_ctx.rdy_comp_ring_wp_pa =
+				in->u.ul_smmu.rdy_comp_ring_wp_pa;
+			ipa3_ctx->uc_ctx.rdy_comp_ring_size =
+				in->u.ul_smmu.rdy_comp_ring_size;
+		} else {
+			IPADBG("rx_ring_base_pa=0x%pa\n",
+				&in->u.ul.rdy_ring_base_pa);
+			IPADBG("rx_ring_size=%d\n",
+				in->u.ul.rdy_ring_size);
+			IPADBG("rx_ring_rp_pa=0x%pa\n",
+				&in->u.ul.rdy_ring_rp_pa);
+			IPADBG("rx_comp_ring_base_pa=0x%pa\n",
+				&in->u.ul.rdy_comp_ring_base_pa);
+			IPADBG("rx_comp_ring_size=%d\n",
+				in->u.ul.rdy_comp_ring_size);
+			IPADBG("rx_comp_ring_wp_pa=0x%pa\n",
+				&in->u.ul.rdy_comp_ring_wp_pa);
+			ipa3_ctx->uc_ctx.rdy_ring_base_pa =
+				in->u.ul.rdy_ring_base_pa;
+			ipa3_ctx->uc_ctx.rdy_ring_rp_pa =
+				in->u.ul.rdy_ring_rp_pa;
+			ipa3_ctx->uc_ctx.rdy_ring_size =
+				in->u.ul.rdy_ring_size;
+			ipa3_ctx->uc_ctx.rdy_comp_ring_base_pa =
+				in->u.ul.rdy_comp_ring_base_pa;
+			ipa3_ctx->uc_ctx.rdy_comp_ring_wp_pa =
+				in->u.ul.rdy_comp_ring_wp_pa;
+			ipa3_ctx->uc_ctx.rdy_comp_ring_size =
+				in->u.ul.rdy_comp_ring_size;
+		}
 	}
 
 	cmd.base = dma_alloc_coherent(ipa3_ctx->uc_pdev, cmd.size,
@@ -945,10 +980,11 @@ int ipa3_connect_wdi_pipe(struct ipa_wdi_in_params *in,
 			tx->comp_ring_size = len;
 			len = in->smmu_enabled ? in->u.dl_smmu.ce_ring_size :
 				in->u.dl.ce_ring_size;
-			IPADBG("TX CE ring smmu_en=%d ring_size=%d %d\n",
+			IPADBG("TX CE ring smmu_en=%d ring_size=%d %d 0x%lx\n",
 					in->smmu_enabled,
 					in->u.dl_smmu.ce_ring_size,
-					in->u.dl.ce_ring_size);
+					in->u.dl.ce_ring_size,
+					va);
 			if (ipa_create_uc_smmu_mapping(IPA_WDI_CE_RING_RES,
 						in->smmu_enabled,
 						in->u.dl.ce_ring_base_pa,
@@ -975,8 +1011,19 @@ int ipa3_connect_wdi_pipe(struct ipa_wdi_in_params *in,
 				result = -ENOMEM;
 				goto uc_timeout;
 			}
-			tx->ce_ring_doorbell_pa = va;
-			tx->num_tx_buffers = in->u.dl.num_tx_buffers;
+
+			IPADBG("CE doorbell pa: 0x%pa va:0x%lx\n", &pa, va);
+			IPADBG("Is wdi_over_pcie ? (%s)\n",
+				ipa3_ctx->wdi_over_pcie ? "Yes":"No");
+
+			if (ipa3_ctx->wdi_over_pcie)
+				tx->ce_ring_doorbell_pa = pa;
+			else
+				tx->ce_ring_doorbell_pa = va;
+
+			tx->num_tx_buffers = in->smmu_enabled ?
+				in->u.dl_smmu.num_tx_buffers :
+				in->u.dl.num_tx_buffers;
 			tx->ipa_pipe_number = ipa_ep_idx;
 		}
 		out->uc_door_bell_pa = ipa3_ctx->ipa_wrapper_base +
@@ -1243,15 +1290,18 @@ int ipa3_disconnect_wdi_pipe(u32 clnt_hdl)
 
 	if (result) {
 		result = -EFAULT;
+		if (!ep->keep_ipa_awake)
+			IPA_ACTIVE_CLIENTS_DEC_EP(
+				ipa3_get_client_mapping(clnt_hdl));
 		goto uc_timeout;
 	}
 
 	ipa3_delete_dflt_flt_rules(clnt_hdl);
 	ipa_release_uc_smmu_mappings(ep->client);
 
+	if (!ep->keep_ipa_awake)
+		IPA_ACTIVE_CLIENTS_DEC_EP(ipa3_get_client_mapping(clnt_hdl));
 	memset(&ipa3_ctx->ep[clnt_hdl], 0, sizeof(struct ipa3_ep_context));
-	IPA_ACTIVE_CLIENTS_DEC_EP(ipa3_get_client_mapping(clnt_hdl));
-
 	IPADBG("client (ep: %d) disconnected\n", clnt_hdl);
 
 	/* for AP+STA stats update */
@@ -1317,7 +1367,8 @@ int ipa3_enable_wdi_pipe(u32 clnt_hdl)
 	if (rsrc_grp.rsrc_grp == -1) {
 		IPAERR("invalid group for client %d\n", ep->client);
 		WARN_ON(1);
-		return -EFAULT;
+		result = -EFAULT;
+		goto uc_timeout;
 	}
 
 	IPADBG("Setting group %d for pipe %d\n",
@@ -1331,11 +1382,11 @@ int ipa3_enable_wdi_pipe(u32 clnt_hdl)
 		holb_cfg.tmr_val = 0;
 		result = ipa3_cfg_ep_holb(clnt_hdl, &holb_cfg);
 	}
-	IPA_ACTIVE_CLIENTS_DEC_EP(ipa3_get_client_mapping(clnt_hdl));
 	ep->uc_offload_state |= IPA_WDI_ENABLED;
 	IPADBG("client (ep: %d) enabled\n", clnt_hdl);
 
 uc_timeout:
+	IPA_ACTIVE_CLIENTS_DEC_EP(ipa3_get_client_mapping(clnt_hdl));
 	return result;
 }
 
@@ -1428,12 +1479,12 @@ int ipa3_disable_wdi_pipe(u32 clnt_hdl)
 		ep_cfg_ctrl.ipa_ep_delay = true;
 		ipa3_cfg_ep_ctrl(clnt_hdl, &ep_cfg_ctrl);
 	}
-	IPA_ACTIVE_CLIENTS_DEC_EP(ipa3_get_client_mapping(clnt_hdl));
 	ep->uc_offload_state &= ~IPA_WDI_ENABLED;
 	IPADBG("client (ep: %d) disabled\n", clnt_hdl);
 
 
 uc_timeout:
+	IPA_ACTIVE_CLIENTS_DEC_EP(ipa3_get_client_mapping(clnt_hdl));
 	return result;
 }
 
@@ -1701,11 +1752,11 @@ int ipa3_write_qmapid_wdi_pipe(u32 clnt_hdl, u8 qmap_id)
 		result = -EFAULT;
 		goto uc_timeout;
 	}
-	IPA_ACTIVE_CLIENTS_DEC_EP(ipa3_get_client_mapping(clnt_hdl));
 
 	IPADBG("client (ep: %d) qmap_id %d updated\n", clnt_hdl, qmap_id);
 
 uc_timeout:
+	IPA_ACTIVE_CLIENTS_DEC_EP(ipa3_get_client_mapping(clnt_hdl));
 	return result;
 }
 

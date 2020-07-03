@@ -21,16 +21,22 @@
 bool __list_add_valid(struct list_head *new, struct list_head *prev,
 		      struct list_head *next)
 {
+
 	if (CHECK_DATA_CORRUPTION(next->prev != prev,
-			"list_add corruption. next->prev should be prev (%p), but was %p. (next=%p).\n",
-			prev, next->prev, next) ||
-	    CHECK_DATA_CORRUPTION(prev->next != next,
-			"list_add corruption. prev->next should be next (%p), but was %p. (prev=%p).\n",
-			next, prev->next, prev) ||
-	    CHECK_DATA_CORRUPTION(new == prev || new == next,
-			"list_add double add: new=%p, prev=%p, next=%p.\n",
-			new, prev, next))
-		return false;
+                        "list_add corruption. next->prev should be prev (%p), but was %p. (next=%p).\n",
+                        prev, next->prev, next) ||
+            CHECK_DATA_CORRUPTION(prev->next != next,
+                        "list_add corruption. prev->next should be next (%p), but was %p. (prev=%p).\n",
+                        next, prev->next, prev) ||
+            CHECK_DATA_CORRUPTION(new == prev || new == next,
+                        "list_add double add: new=%p, prev=%p, next=%p.\n",
+                        new, prev, next))
+                return false;
+
+	next->prev = new;
+	new->next = next;
+	new->prev = prev;
+	WRITE_ONCE(prev->next, new);
 
 	return true;
 }

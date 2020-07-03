@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2018, 2020 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -63,7 +63,16 @@ int ipa3_enable_data_path(u32 clnt_hdl)
 	IPADBG("Enabling data path\n");
 	if (IPA_CLIENT_IS_CONS(ep->client)) {
 		memset(&holb_cfg, 0, sizeof(holb_cfg));
-		holb_cfg.en = IPA_HOLB_TMR_DIS;
+		/*
+		 * Set HOLB on USB DPL CONS to avoid IPA stall
+		 * if DPL client is not pulling the data
+		 * on other end from IPA hw.
+		 */
+		if ((ep->client == IPA_CLIENT_USB_DPL_CONS) ||
+				(ep->client == IPA_CLIENT_MHI_DPL_CONS))
+			holb_cfg.en = IPA_HOLB_TMR_EN;
+		else
+			holb_cfg.en = IPA_HOLB_TMR_DIS;
 		holb_cfg.tmr_val = 0;
 		res = ipa3_cfg_ep_holb(clnt_hdl, &holb_cfg);
 	}
@@ -635,6 +644,87 @@ int ipa3_smmu_map_peer_buff(u64 iova, u32 size, bool map, struct sg_table *sgt,
 	return 0;
 }
 
+static enum ipa_client_cb_type ipa_get_client_cb_type(
+					enum ipa_client_type client_type)
+{
+	enum ipa_client_cb_type client_cb;
+
+	if (client_type == IPA_CLIENT_USB_PROD ||
+			client_type == IPA_CLIENT_USB_CONS) {
+		IPADBG("USB Client registered\n");
+		client_cb = IPA_USB_CLNT;
+	} else if (client_type == IPA_CLIENT_MHI_PROD ||
+			client_type == IPA_CLIENT_MHI_CONS) {
+		IPADBG("MHI Client registered\n");
+		client_cb = IPA_MHI_CLNT;
+	} else {
+		IPAERR("Invalid IPA client\n");
+		client_cb = IPA_MAX_CLNT;
+	}
+
+	return client_cb;
+}
+void ipa3_register_client_callback(int (*client_cb)(bool is_lock),
+				bool (*teth_port_state)(void),
+				enum ipa_client_type client_type)
+{
+	enum ipa_client_cb_type client;
+
+	IPADBG("entry\n");
+
+	client = ipa_get_client_cb_type(client_type);
+	if (client == IPA_MAX_CLNT)
+		return;
+
+	if (client_cb == NULL) {
+		IPAERR("Bad Param");
+		return;
+	}
+
+	if (!ipa3_ctx->client_lock_unlock[client])
+		ipa3_ctx->client_lock_unlock[client] = client_cb;
+
+	if (!ipa3_ctx->get_teth_port_state[client])
+		ipa3_ctx->get_teth_port_state[client] = teth_port_state;
+	IPADBG("exit\n");
+}
+
+void ipa3_deregister_client_callback(enum ipa_client_type client_type)
+{
+	enum ipa_client_cb_type client_cb;
+
+	IPADBG("entry\n");
+
+	client_cb = ipa_get_client_cb_type(client_type);
+	if (client_cb == IPA_MAX_CLNT)
+		return;
+
+	if (ipa3_ctx->client_lock_unlock[client_cb] == NULL &&
+			ipa3_ctx->get_teth_port_state[client_cb] == NULL) {
+		IPAERR("client_lock_unlock is already NULL");
+		return;
+	}
+
+	ipa3_ctx->client_lock_unlock[client_cb] = NULL;
+	ipa3_ctx->get_teth_port_state[client_cb] = NULL;
+	IPADBG("exit\n");
+}
+
+static void client_lock_unlock_cb(enum ipa_client_type client, bool is_lock)
+{
+	enum ipa_client_cb_type client_cb;
+
+	IPADBG("entry\n");
+
+	client_cb = ipa_get_client_cb_type(client);
+	if (client_cb == IPA_MAX_CLNT)
+		return;
+
+	if (ipa3_ctx->client_lock_unlock[client_cb])
+		ipa3_ctx->client_lock_unlock[client_cb](is_lock);
+
+	IPADBG("exit\n");
+}
 
 int ipa3_request_gsi_channel(struct ipa_request_gsi_channel_params *params,
 			     struct ipa_req_chan_out_params *out_params)
@@ -684,12 +774,13 @@ int ipa3_request_gsi_channel(struct ipa_request_gsi_channel_params *params,
 		if (ipa_ep_idx >= ipa3_ctx->ipa_num_pipes ||
 			ipa3_ctx->ep[ipa_ep_idx].valid == 0) {
 			IPAERR("bad parm.\n");
-			return -EINVAL;
+			result = -EINVAL;
+			goto ipa_cfg_ep_fail;
 		}
 		result = ipa3_cfg_ep_cfg(ipa_ep_idx, &params->ipa_ep_cfg.cfg);
 		if (result) {
 			IPAERR("fail to configure QMB.\n");
-			return result;
+			goto ipa_cfg_ep_fail;
 		}
 	}
 
@@ -707,6 +798,13 @@ int ipa3_request_gsi_channel(struct ipa_request_gsi_channel_params *params,
 		IPADBG("ep configuration successful\n");
 	} else {
 		IPADBG("Skipping endpoint configuration.\n");
+		if (IPA_CLIENT_IS_PROD(ipa3_ctx->ep[ipa_ep_idx].client) &&
+			ipa3_ctx->ep[ipa_ep_idx].client == IPA_CLIENT_USB_PROD)
+			if (ipa3_cfg_ep_seq(ipa_ep_idx,
+						&params->ipa_ep_cfg.seq)) {
+				IPAERR("fail to configure USB pipe seq\n");
+				goto ipa_cfg_ep_fail;
+			}
 	}
 
 	out_params->clnt_hdl = ipa_ep_idx;
@@ -831,6 +929,7 @@ int ipa3_set_usb_max_packet_size(
 		&dev_scratch);
 	if (gsi_res != GSI_STATUS_SUCCESS) {
 		IPAERR("Error writing device scratch: %d\n", gsi_res);
+		IPA_ACTIVE_CLIENTS_DEC_SIMPLE();
 		return -EFAULT;
 	}
 	IPA_ACTIVE_CLIENTS_DEC_SIMPLE();
@@ -1159,7 +1258,8 @@ static int ipa3_stop_ul_chan_with_data_drain(u32 qmi_req_id,
 	if (!stop_in_proc)
 		goto exit;
 
-	if (remove_delay && ep->ep_delay_set == true) {
+	/* Remove delay only if stop channel success*/
+	if (remove_delay && ep->ep_delay_set == true && !stop_in_proc) {
 		memset(&ep_cfg_ctrl, 0, sizeof(struct ipa_ep_cfg_ctrl));
 		ep_cfg_ctrl.ipa_ep_delay = false;
 		result = ipa3_cfg_ep_ctrl(clnt_hdl,
@@ -1240,7 +1340,7 @@ disable_force_clear_and_exit:
 	if (should_force_clear)
 		ipa3_disable_force_clear(qmi_req_id);
 exit:
-	if (remove_delay && ep->ep_delay_set == true) {
+	if (remove_delay && ep->ep_delay_set == true && !stop_in_proc) {
 		memset(&ep_cfg_ctrl, 0, sizeof(struct ipa_ep_cfg_ctrl));
 		ep_cfg_ctrl.ipa_ep_delay = false;
 		result = ipa3_cfg_ep_ctrl(clnt_hdl,
@@ -1257,6 +1357,104 @@ exit:
 	}
 	IPADBG("exit\n");
 	return result;
+}
+
+/*
+ * Set reset ep_delay for CLEINT PROD pipe
+ * Clocks, should be voted before calling this API
+ * locks should be taken before calling this API
+ */
+
+int ipa3_set_reset_client_prod_pipe_delay(bool set_reset,
+		enum ipa_client_type client)
+{
+	int result = 0;
+	int pipe_idx;
+	struct ipa3_ep_context *ep;
+	struct ipa_ep_cfg_ctrl ep_ctrl;
+
+	memset(&ep_ctrl, 0, sizeof(struct ipa_ep_cfg_ctrl));
+	ep_ctrl.ipa_ep_delay = set_reset;
+
+	if (IPA_CLIENT_IS_CONS(client)) {
+		IPAERR("client (%d) not PROD\n", client);
+		return -EINVAL;
+	}
+
+	pipe_idx = ipa3_get_ep_mapping(client);
+
+	if (pipe_idx == IPA_EP_NOT_ALLOCATED) {
+		IPAERR("client (%d) not valid\n", client);
+		return -EINVAL;
+	}
+
+	ep = &ipa3_ctx->ep[pipe_idx];
+
+	/* Setting delay on USB_PROD with skip_ep_cfg */
+	client_lock_unlock_cb(client, true);
+	if (ep->valid && ep->skip_ep_cfg) {
+		ep->ep_delay_set = ep_ctrl.ipa_ep_delay;
+		result = ipa3_cfg_ep_ctrl(pipe_idx, &ep_ctrl);
+		if (result)
+			IPAERR("client (ep: %d) failed result=%d\n",
+				pipe_idx, result);
+		else
+			IPADBG("client (ep: %d) success\n", pipe_idx);
+	}
+	client_lock_unlock_cb(client, false);
+	return result;
+}
+
+int ipa3_set_reset_client_cons_pipe_sus_holb(bool set_reset,
+		enum ipa_client_type client)
+{
+	int pipe_idx;
+	struct ipa3_ep_context *ep;
+	struct ipa_ep_cfg_ctrl ep_suspend;
+	struct ipa_ep_cfg_holb ep_holb;
+
+	memset(&ep_suspend, 0, sizeof(ep_suspend));
+	memset(&ep_holb, 0, sizeof(ep_holb));
+
+	ep_suspend.ipa_ep_suspend = set_reset;
+	ep_holb.tmr_val = 0;
+	ep_holb.en = set_reset;
+
+	if (IPA_CLIENT_IS_PROD(client)) {
+		IPAERR("client (%d) not CONS\n", client);
+		return -EINVAL;
+	}
+
+	pipe_idx = ipa3_get_ep_mapping(client);
+
+	if (pipe_idx == IPA_EP_NOT_ALLOCATED) {
+		IPAERR("client (%d) not valid\n", client);
+		return -EINVAL;
+	}
+
+	ep = &ipa3_ctx->ep[pipe_idx];
+	/* Setting sus/holb on MHI_CONS with skip_ep_cfg */
+	client_lock_unlock_cb(client, true);
+	if (ep->valid && ep->skip_ep_cfg) {
+		if (ipa3_ctx->ipa_hw_type < IPA_HW_v4_0)
+			ipahal_write_reg_n_fields(
+					IPA_ENDP_INIT_CTRL_n,
+					pipe_idx, &ep_suspend);
+		/*
+		 * ipa3_cfg_ep_holb is not used here because we are
+		 * setting HOLB on Q6 pipes, and from APPS perspective
+		 * they are not valid, therefore, the above function
+		 * will fail.
+		 */
+		ipahal_write_reg_n_fields(
+			IPA_ENDP_INIT_HOL_BLOCK_TIMER_n,
+			pipe_idx, &ep_holb);
+		ipahal_write_reg_n_fields(
+			IPA_ENDP_INIT_HOL_BLOCK_EN_n,
+			pipe_idx, &ep_holb);
+	}
+	client_lock_unlock_cb(client, false);
+	return 0;
 }
 
 void ipa3_xdci_ep_delay_rm(u32 clnt_hdl)
@@ -1675,9 +1873,7 @@ int ipa3_clear_endpoint_delay(u32 clnt_hdl)
 	/* Set disconnect in progress flag so further flow control events are
 	 * not honored.
 	 */
-	spin_lock(&ipa3_ctx->disconnect_lock);
-	ep->disconnect_in_progress = true;
-	spin_unlock(&ipa3_ctx->disconnect_lock);
+	atomic_set(&ep->disconnect_in_progress, 1);
 
 	/* If flow is disabled at this point, restore the ep state.*/
 	ep_ctrl.ipa_ep_delay = false;

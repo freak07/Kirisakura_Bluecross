@@ -400,7 +400,9 @@ static int hw_device_state(u32 dma)
 		hw_cwrite(CAP_USBINTR, ~0,
 			     USBi_UI|USBi_UEI|USBi_PCI|USBi_URI|USBi_SLI);
 		hw_cwrite(CAP_USBCMD, USBCMD_RS, USBCMD_RS);
+		udc->transceiver->flags |= PHY_SOFT_CONNECT;
 	} else {
+		udc->transceiver->flags &= ~PHY_SOFT_CONNECT;
 		hw_cwrite(CAP_USBCMD, USBCMD_RS, 0);
 		hw_cwrite(CAP_USBINTR, ~0, 0);
 		/* Clear BIT(31) to disable AHB2AHB Bypass functionality */
@@ -3541,6 +3543,9 @@ static int ci13xxx_pullup(struct usb_gadget *_gadget, int is_active)
 		hw_device_state(udc->ep0out.qh.dma);
 	} else {
 		hw_device_state(0);
+		spin_unlock_irqrestore(udc->lock, flags);
+		_gadget_stop_activity(&udc->gadget);
+		spin_lock_irqsave(udc->lock, flags);
 	}
 	spin_unlock_irqrestore(udc->lock, flags);
 

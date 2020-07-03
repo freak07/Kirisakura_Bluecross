@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2018, The Linux Foundation. All rights reserved.
  *
  * Description: CoreSight System Trace Macrocell driver
  *
@@ -215,7 +215,7 @@ static void stm_disable(struct coresight_device *csdev,
 		spin_unlock(&drvdata->spinlock);
 
 		/* Wait until the engine has completely stopped */
-		coresight_timeout(drvdata, STMTCSR, STMTCSR_BUSY_BIT, 0);
+		coresight_timeout(drvdata->base, STMTCSR, STMTCSR_BUSY_BIT, 0);
 
 		pm_runtime_put(drvdata->dev);
 
@@ -297,7 +297,7 @@ static void stm_generic_unlink(struct stm_data *stm_data,
 		return;
 
 	/* If any OST entity is enabled do not disable the device */
-	if (drvdata->entities)
+	if (!bitmap_empty(drvdata->entities, OST_ENTITY_MAX))
 		return;
 
 	coresight_disable(drvdata->csdev);
@@ -839,11 +839,6 @@ static int stm_probe(struct amba_device *adev, const struct amba_id *id)
 	}
 	bitmap_size = BITS_TO_LONGS(drvdata->numsp) * sizeof(long);
 
-	/* Store the driver data pointer for use in exported functions */
-	ret = stm_set_ost_params(drvdata, bitmap_size);
-	if (ret)
-		return ret;
-
 	guaranteed = devm_kzalloc(dev, bitmap_size, GFP_KERNEL);
 	if (!guaranteed)
 		return -ENOMEM;
@@ -871,6 +866,11 @@ static int stm_probe(struct amba_device *adev, const struct amba_id *id)
 		ret = PTR_ERR(drvdata->csdev);
 		goto stm_unregister;
 	}
+
+	/* Store the driver data pointer for use in exported functions */
+	ret = stm_set_ost_params(drvdata, bitmap_size);
+	if (ret)
+		goto stm_unregister;
 
 	pm_runtime_put(&adev->dev);
 

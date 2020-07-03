@@ -1438,7 +1438,8 @@ ax88179_tx_fixup(struct usbnet *dev, struct sk_buff *skb, gfp_t flags)
 
 	headroom = skb_headroom(skb) - 8;
 
-	if ((skb_header_cloned(skb) || headroom < 0) &&
+	if (((!(skb->fast_forwarded) && skb_header_cloned(skb)) ||
+	     headroom < 0) &&
 	    pskb_expand_head(skb, headroom < 0 ? 8 : 0, 0, GFP_ATOMIC)) {
 		dev_kfree_skb_any(skb);
 		return NULL;
@@ -1659,6 +1660,19 @@ static const struct driver_info ax88178a_info = {
 	.tx_fixup = ax88179_tx_fixup,
 };
 
+static const struct driver_info ax88178b_info = {
+	.description = "ASIX AX88178B USB 2.0 Gigabit Ethernet",
+	.bind = ax88179_bind,
+	.unbind = ax88179_unbind,
+	.status = ax88179_status,
+	.link_reset = ax88179_link_reset,
+	.reset = ax88179_reset,
+	.stop = ax88179_stop,
+	.flags = FLAG_ETHER | FLAG_FRAMING_AX,
+	.rx_fixup = ax88179_rx_fixup,
+	.tx_fixup = ax88179_tx_fixup,
+};
+
 static const struct driver_info cypress_GX3_info = {
 	.description = "Cypress GX3 SuperSpeed to Gigabit Ethernet Controller",
 	.bind = ax88179_bind,
@@ -1733,6 +1747,10 @@ static const struct usb_device_id products[] = {
 	/* ASIX AX88178A 10/100/1000 */
 	USB_DEVICE(0x0b95, 0x178a),
 	.driver_info = (unsigned long)&ax88178a_info,
+}, {
+	/* ASIX AX88178A 10/100/1000 */
+	USB_DEVICE(0x0b95, 0x178b),
+	.driver_info = (unsigned long)&ax88178b_info,
 }, {
 	/* Cypress GX3 SuperSpeed to Gigabit Ethernet Bridge Controller */
 	USB_DEVICE(0x04b4, 0x3610),

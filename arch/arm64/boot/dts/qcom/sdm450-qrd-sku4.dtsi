@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018-2020, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -13,7 +13,7 @@
 
 #include "msm8953-qrd.dtsi"
 #include "msm8953-mdss-panels.dtsi"
-#include "msm8953-camera-sensor-qrd.dtsi"
+#include "sdm450-camera-sensor-qrd.dtsi"
 
 &qusb_phy {
 	qcom,qusb-phy-init-seq = <0x78 0x80
@@ -178,6 +178,9 @@
 };
 
 &i2c_2 {
+#address-cells = <1>;
+#size-cells = <0>;
+
 #include "smb1355.dtsi"
 };
 
@@ -194,6 +197,15 @@
 		/* GPIO 7 and 8 are external-sense pins for PMI632 */
 		pmi632_sense_default: pmi632_sense_default {
 			pins = "gpio7", "gpio8";
+			bias-high-impedance;	/* disable the GPIO */
+			bias-disable;		/* no-pull */
+		};
+	};
+
+	pmi632_ctm {
+		/* Disable GPIO1 for h/w base mitigation */
+		pmi632_ctm_default: pmi632_ctm_default {
+			pins = "gpio1";
 			bias-high-impedance;	/* disable the GPIO */
 			bias-disable;		/* no-pull */
 		};
@@ -218,7 +230,7 @@
 &smb1355_0 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&smb_int_default
-		&smb_en_default &pmi632_sense_default>;
+		&smb_en_default &pmi632_sense_default &pmi632_ctm_default>;
 	interrupt-parent = <&tlmm>;
 	interrupts = <59 IRQ_TYPE_LEVEL_LOW>;
 	smb1355_charger_0: qcom,smb1355-charger@1000 {
@@ -226,13 +238,15 @@
 		/delete-property/ io-channels;
 		/delete-property/ io-channels-names;
 		qcom,parallel-mode = <1>;
+		qcom,disable-ctm;
+		qcom,hw-die-temp-mitigation;
 	};
 };
 
 &smb1355_1 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&smb_int_default
-		&smb_en_default &pmi632_sense_default>;
+		&smb_en_default &pmi632_sense_default &pmi632_ctm_default>;
 	interrupt-parent = <&tlmm>;
 	interrupts = <59 IRQ_TYPE_LEVEL_LOW>;
 	smb1355_charger_1: qcom,smb1355-charger@1000 {
@@ -240,5 +254,12 @@
 		/delete-property/ io-channels;
 		/delete-property/ io-channels-names;
 		qcom,parallel-mode = <1>;
+		qcom,disable-ctm;
+		qcom,hw-die-temp-mitigation;
 	};
+};
+
+&pmi632_charger {
+	qcom,thermal-mitigation = <4200000 3500000 3000000 2500000
+				2000000 1500000 1000000 500000>;
 };

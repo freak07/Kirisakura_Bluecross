@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -51,7 +51,7 @@
 };
 
 &pil_gpu_mem {
-	reg = <0 0x90f15000 0 0x2000>;
+	reg = <0 0x90f15000 0 0x4000>;
 };
 
 &adsp_mem {
@@ -59,7 +59,12 @@
 };
 
 &secure_display_memory {
-	status = "disabled";
+	size = <0 0xa000000>;
+};
+
+&qcom_seecom {
+	reg = <0x86d00000 0x800000>;
+	/delete-property/ qcom,appsbl-qseecom-support;
 };
 
 &sp_mem {
@@ -76,8 +81,20 @@
 	};
 };
 
+&llcc {
+	compatible = "qcom,qcs605-llcc";
+};
+
+&mdss_mdp {
+	/delete-property/ qcom,sde-inline-rotator;
+};
+
 &ipa_hw {
 	status = "disabled";
+};
+
+&sde_dp {
+	qcom,max-pclk-frequency-khz = <675000>;
 };
 
 &mem_dump {
@@ -90,8 +107,8 @@
 	lmh-dcvs-00 {
 		trips {
 			active-config {
-				temperature = <105000>;
-				hysteresis = <40000>;
+				temperature = <100000>;
+				hysteresis = <35000>;
 			};
 		};
 	};
@@ -99,10 +116,35 @@
 	lmh-dcvs-01 {
 		trips {
 			active-config {
-				temperature = <105000>;
-				hysteresis = <40000>;
+				temperature = <100000>;
+				hysteresis = <35000>;
 			};
 		};
+	};
+
+	gpu-virt-max-step {
+		trips {
+			gpu-trip0 {
+				temperature = <100000>;
+			};
+		};
+	};
+
+	pop-mem-step {
+		status = "disabled";
+	};
+
+	xo-therm-step {
+		status = "disabled";
+	};
+
+	xo-therm-605-step {
+		polling-delay-passive = <2000>;
+		polling-delay = <0>;
+		thermal-sensors = <&pm660_adc_tm 0x4c>;
+		wake-capable-sensor;
+		thermal-governor = "step_wise";
+		status = "ok";
 	};
 };
 
@@ -380,4 +422,12 @@
 			};
 		};
 	};
+};
+
+&apps_smmu {
+	/delete-property/ qcom,actlr;
+};
+
+&kgsl_smmu {
+	/delete-property/qcom,deferred-regulator-disable-delay;
 };

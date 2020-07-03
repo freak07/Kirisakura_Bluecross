@@ -196,8 +196,7 @@ int pfn_valid(unsigned long pfn)
 
 	if (__phys_to_pfn(addr) != pfn)
 		return 0;
-
-	return memblock_is_map_memory(__pfn_to_phys(pfn));
+	return memblock_is_map_memory(addr);
 }
 EXPORT_SYMBOL(pfn_valid);
 #endif
@@ -721,11 +720,14 @@ static inline void pte_update(unsigned long addr, pteval_t mask,
 				  pteval_t prot, struct mm_struct *mm)
 {
 	struct pte_data data;
+	struct mm_struct *apply_mm = mm;
 
 	data.mask = mask;
 	data.val = prot;
 
-	apply_to_page_range(mm, addr, SECTION_SIZE, __pte_update, &data);
+	if (addr >= PAGE_OFFSET)
+		apply_mm = &init_mm;
+	apply_to_page_range(apply_mm, addr, SECTION_SIZE, __pte_update, &data);
 	flush_tlb_kernel_range(addr, addr + SECTION_SIZE);
 }
 

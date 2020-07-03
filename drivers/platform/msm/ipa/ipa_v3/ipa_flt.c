@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -51,7 +51,7 @@ static int ipa3_generate_flt_hw_rule(enum ipa_ip_type ip,
 	memset(&gen_params, 0, sizeof(gen_params));
 
 	gen_params.ipt = ip;
-	if (entry->rt_tbl)
+	if (entry->rt_tbl && (!ipa3_check_idr_if_freed(entry->rt_tbl)))
 		gen_params.rt_tbl_idx = entry->rt_tbl->idx;
 	else
 		gen_params.rt_tbl_idx = entry->rule.rt_tbl_idx;
@@ -1014,40 +1014,11 @@ static int __ipa_mdfy_flt_rule(struct ipa_flt_rule_mdfy *frule,
 		goto error;
 	}
 
+	if (__ipa_validate_flt_rule(&frule->rule, &rt_tbl, ip))
+		goto error;
+
 	if (entry->rt_tbl)
 		entry->rt_tbl->ref_cnt--;
-
-	if (frule->rule.action != IPA_PASS_TO_EXCEPTION) {
-		if (!frule->rule.eq_attrib_type) {
-			if (!frule->rule.rt_tbl_hdl) {
-				IPAERR_RL("invalid RT tbl\n");
-				goto error;
-			}
-
-			rt_tbl = ipa3_id_find(frule->rule.rt_tbl_hdl);
-			if (rt_tbl == NULL) {
-				IPAERR_RL("RT tbl not found\n");
-				goto error;
-			}
-
-			if (rt_tbl->cookie != IPA_RT_TBL_COOKIE) {
-				IPAERR_RL("RT table cookie is invalid\n");
-				goto error;
-			}
-		} else {
-			if (frule->rule.rt_tbl_idx > ((ip == IPA_IP_v4) ?
-				IPA_MEM_PART(v4_modem_rt_index_hi) :
-				IPA_MEM_PART(v6_modem_rt_index_hi))) {
-				IPAERR_RL("invalid RT tbl\n");
-				goto error;
-			}
-		}
-	} else {
-		if (frule->rule.rt_tbl_idx > 0) {
-			IPAERR_RL("invalid RT tbl\n");
-			goto error;
-		}
-	}
 
 	entry->rule = frule->rule;
 	entry->rt_tbl = rt_tbl;
@@ -1429,7 +1400,9 @@ int ipa3_reset_flt(enum ipa_ip_type ip, bool user_only)
 					entry->ipacm_installed) {
 				list_del(&entry->link);
 				entry->tbl->rule_cnt--;
-				if (entry->rt_tbl)
+				if (entry->rt_tbl &&
+					(!ipa3_check_idr_if_freed(
+						entry->rt_tbl)))
 					entry->rt_tbl->ref_cnt--;
 				/* if rule id was allocated from idr, remove */
 				rule_id = entry->rule_id;

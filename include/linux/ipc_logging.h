@@ -15,6 +15,7 @@
 
 #include <linux/errno.h>
 #include <linux/types.h>
+#include <linux/err.h>
 
 #define MAX_MSG_SIZE 255
 

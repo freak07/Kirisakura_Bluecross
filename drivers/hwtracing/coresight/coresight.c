@@ -1,4 +1,4 @@
-/* Copyright (c) 2012, 2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012, 2017-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -89,6 +89,23 @@ static int coresight_source_is_unique(struct coresight_device *csdev)
 
 	return !bus_for_each_dev(&coresight_bustype, NULL,
 				 csdev, coresight_id_match);
+}
+
+static int coresight_reset_sink(struct device *dev, void *data)
+{
+	struct coresight_device *csdev = to_coresight_device(dev);
+
+	if ((csdev->type == CORESIGHT_DEV_TYPE_SINK ||
+			csdev->type == CORESIGHT_DEV_TYPE_LINKSINK) &&
+			csdev->activated)
+		csdev->activated = false;
+
+	return 0;
+}
+
+static void coresight_reset_all_sink(void)
+{
+	bus_for_each_dev(&coresight_bustype, NULL, NULL, coresight_reset_sink);
 }
 
 static int coresight_find_link_inport(struct coresight_device *csdev,
@@ -186,8 +203,10 @@ static int coresight_enable_link(struct coresight_device *csdev,
 	if (atomic_inc_return(&csdev->refcnt[refport]) == 1) {
 		if (link_ops(csdev)->enable) {
 			ret = link_ops(csdev)->enable(csdev, inport, outport);
-			if (ret)
+			if (ret) {
+				atomic_dec(&csdev->refcnt[refport]);
 				return ret;
+			}
 		}
 	}
 
@@ -268,42 +287,66 @@ static void coresight_disable_source(struct coresight_device *csdev)
 	}
 }
 
-void coresight_disable_path(struct list_head *path)
+static void coresigh_disable_list_node(struct list_head *path,
+					struct coresight_node *nd)
 {
 	u32 type;
-	struct coresight_node *nd;
 	struct coresight_device *csdev, *parent, *child;
 
+	csdev = nd->csdev;
+	type = csdev->type;
+
+	/*
+	 * ETF devices are tricky... They can be a link or a sink,
+	 * depending on how they are configured.  If an ETF has been
+	 * "activated" it will be configured as a sink, otherwise
+	 * go ahead with the link configuration.
+	 */
+	if (type == CORESIGHT_DEV_TYPE_LINKSINK)
+		type = (csdev == coresight_get_sink(path)) ?
+					CORESIGHT_DEV_TYPE_SINK :
+					CORESIGHT_DEV_TYPE_LINK;
+
+	switch (type) {
+	case CORESIGHT_DEV_TYPE_SINK:
+		coresight_disable_sink(csdev);
+		break;
+	case CORESIGHT_DEV_TYPE_SOURCE:
+		/* sources are disabled from either sysFS or Perf */
+		break;
+	case CORESIGHT_DEV_TYPE_LINK:
+		parent = list_prev_entry(nd, link)->csdev;
+		child = list_next_entry(nd, link)->csdev;
+		coresight_disable_link(csdev, parent, child);
+		break;
+	default:
+		break;
+	}
+}
+
+/**
+ * During enabling path, if it is failed, then only those enabled
+ * devices need to be disabled. This function is to disable devices
+ * which is enabled before the failed device.
+ *
+ * @path the head of the list
+ * @nd the failed device node
+ */
+static void coresight_disable_previous_devs(struct list_head *path,
+					struct coresight_node *nd)
+{
+
+	list_for_each_entry_continue(nd, path, link) {
+		coresigh_disable_list_node(path, nd);
+	}
+}
+
+void coresight_disable_path(struct list_head *path)
+{
+	struct coresight_node *nd;
+
 	list_for_each_entry(nd, path, link) {
-		csdev = nd->csdev;
-		type = csdev->type;
-
-		/*
-		 * ETF devices are tricky... They can be a link or a sink,
-		 * depending on how they are configured.  If an ETF has been
-		 * "activated" it will be configured as a sink, otherwise
-		 * go ahead with the link configuration.
-		 */
-		if (type == CORESIGHT_DEV_TYPE_LINKSINK)
-			type = (csdev == coresight_get_sink(path)) ?
-						CORESIGHT_DEV_TYPE_SINK :
-						CORESIGHT_DEV_TYPE_LINK;
-
-		switch (type) {
-		case CORESIGHT_DEV_TYPE_SINK:
-			coresight_disable_sink(csdev);
-			break;
-		case CORESIGHT_DEV_TYPE_SOURCE:
-			/* sources are disabled from either sysFS or Perf */
-			break;
-		case CORESIGHT_DEV_TYPE_LINK:
-			parent = list_prev_entry(nd, link)->csdev;
-			child = list_next_entry(nd, link)->csdev;
-			coresight_disable_link(csdev, parent, child);
-			break;
-		default:
-			break;
-		}
+		coresigh_disable_list_node(path, nd);
 	}
 }
 
@@ -360,7 +403,7 @@ int coresight_enable_path(struct list_head *path, u32 mode)
 out:
 	return ret;
 err:
-	coresight_disable_path(path);
+	coresight_disable_previous_devs(path, nd);
 	goto out;
 }
 
@@ -761,6 +804,10 @@ static ssize_t enable_source_store(struct device *dev,
 		return ret;
 
 	if (val) {
+
+		if (csdev->enable)
+			return size;
+
 		ret = coresight_enable(csdev);
 		if (ret)
 			return ret;
@@ -1013,6 +1060,9 @@ static ssize_t reset_source_sink_store(struct bus_type *bus,
 			continue;
 		__coresight_disable(csdev);
 	}
+
+	/* Reset all activated sinks */
+	coresight_reset_all_sink();
 
 	mutex_unlock(&coresight_mutex);
 	return size;

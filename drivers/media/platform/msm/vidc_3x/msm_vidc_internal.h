@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2018, 2020, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -40,8 +40,8 @@
 #define MSM_VIDC_VERSION KERNEL_VERSION(0, 0, 1)
 #define MAX_DEBUGFS_NAME 50
 #define DEFAULT_TIMEOUT 3
-#define DEFAULT_HEIGHT 1088
-#define DEFAULT_WIDTH 1920
+#define DEFAULT_HEIGHT 480
+#define DEFAULT_WIDTH 720
 #define MIN_SUPPORTED_WIDTH 32
 #define MIN_SUPPORTED_HEIGHT 32
 #define DEFAULT_FPS 15
@@ -121,11 +121,20 @@ static inline void INIT_MSM_VIDC_LIST(struct msm_vidc_list *mlist)
 	INIT_LIST_HEAD(&mlist->list);
 }
 
+static inline void DEINIT_MSM_VIDC_LIST(struct msm_vidc_list *mlist)
+{
+	mutex_destroy(&mlist->lock);
+}
 enum buffer_owner {
 	DRIVER,
 	FIRMWARE,
 	CLIENT,
 	MAX_OWNER
+};
+
+struct eos_buf {
+	struct list_head list;
+	struct msm_smem smem;
 };
 
 struct internal_buf {
@@ -164,6 +173,7 @@ struct session_prop {
 	u32 height[MAX_PORT_NUM];
 	u32 fps;
 	u32 bitrate;
+	u32 operating_rate;
 };
 
 struct buf_queue {
@@ -230,6 +240,7 @@ enum msm_vidc_modes {
 	VIDC_TURBO = BIT(1),
 	VIDC_THUMBNAIL = BIT(2),
 	VIDC_LOW_POWER = BIT(3),
+	VIDC_REALTIME = BIT(4),
 };
 
 struct msm_vidc_core {
@@ -268,6 +279,7 @@ struct msm_vidc_inst {
 	struct msm_vidc_list persistbufs;
 	struct msm_vidc_list pending_getpropq;
 	struct msm_vidc_list outputbufs;
+	struct msm_vidc_list eosbufs;
 	struct msm_vidc_list registeredbufs;
 	struct buffer_requirements buff_req;
 	void *mem_client;
@@ -316,7 +328,7 @@ struct msm_vidc_ctrl {
 	s32 maximum;
 	s32 default_value;
 	u32 step;
-	u32 menu_skip_mask;
+	u64 menu_skip_mask;
 	u32 flags;
 	const char * const *qmenu;
 };

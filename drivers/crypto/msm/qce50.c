@@ -1,7 +1,7 @@
 /*
  * QTI Crypto Engine driver.
  *
- * Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -6105,6 +6105,7 @@ err_mem:
 		dma_free_coherent(pce_dev->pdev, pce_dev->memsize,
 			pce_dev->coh_vmem, pce_dev->coh_pmem);
 err_iobase:
+	arm_iommu_detach_device(pce_dev->pdev);
 	if (pce_dev->enable_s1_smmu)
 		qce_iommu_release_iomapping(pce_dev);
 
@@ -6121,13 +6122,15 @@ EXPORT_SYMBOL(qce_open);
 int qce_close(void *handle)
 {
 	struct qce_device *pce_dev = (struct qce_device *) handle;
+	int ret = -1;
 
 	if (handle == NULL)
 		return -ENODEV;
 
 	mutex_lock(&qce_iomap_mutex);
-	qce_enable_clk(pce_dev);
-	qce_sps_exit(pce_dev);
+	ret = qce_enable_clk(pce_dev);
+	if (!ret)
+		qce_sps_exit(pce_dev);
 
 	if (pce_dev->iobase)
 		iounmap(pce_dev->iobase);
@@ -6136,11 +6139,13 @@ int qce_close(void *handle)
 				pce_dev->coh_vmem, pce_dev->coh_pmem);
 	kfree(pce_dev->dummyreq_in_buf);
 	kfree(pce_dev->iovec_vmem);
+	arm_iommu_detach_device(pce_dev->pdev);
 
 	if (pce_dev->enable_s1_smmu)
 		qce_iommu_release_iomapping(pce_dev);
 
-	qce_disable_clk(pce_dev);
+	if (!ret)
+		qce_disable_clk(pce_dev);
 	__qce_deinit_clk(pce_dev);
 	mutex_unlock(&qce_iomap_mutex);
 	kfree(handle);

@@ -105,6 +105,7 @@ struct cpufreq_cooling_device {
 	unsigned int max_level;
 	unsigned int *freq_table;	/* In descending order */
 	struct cpumask allowed_cpus;
+	struct cpufreq_policy *policy;
 	struct list_head node;
 	u32 last_load;
 	u64 *time_in_idle;
@@ -224,7 +225,7 @@ EXPORT_SYMBOL_GPL(cpufreq_cooling_get_level);
 static int cpufreq_cooling_pm_notify(struct notifier_block *nb,
 				unsigned long mode, void *_unused)
 {
-	struct cpufreq_cooling_device *cpufreq_dev;
+	struct cpufreq_cooling_device *cpufreq_dev, *next;
 	unsigned int cpu;
 
 	switch (mode) {
@@ -236,8 +237,8 @@ static int cpufreq_cooling_pm_notify(struct notifier_block *nb,
 	case PM_POST_HIBERNATION:
 	case PM_POST_RESTORE:
 	case PM_POST_SUSPEND:
-		mutex_lock(&cooling_list_lock);
-		list_for_each_entry(cpufreq_dev, &cpufreq_dev_list, node) {
+		list_for_each_entry_safe(cpufreq_dev, next, &cpufreq_dev_list,
+						node) {
 			mutex_lock(&core_isolate_lock);
 			if (cpufreq_dev->cpufreq_state ==
 				cpufreq_dev->max_level) {
@@ -259,7 +260,6 @@ static int cpufreq_cooling_pm_notify(struct notifier_block *nb,
 			}
 			mutex_unlock(&core_isolate_lock);
 		}
-		mutex_unlock(&cooling_list_lock);
 
 		atomic_set(&in_suspend, 0);
 		break;
@@ -340,7 +340,7 @@ static int cpufreq_thermal_notifier(struct notifier_block *nb,
 	unsigned long clipped_freq = ULONG_MAX, floor_freq = 0;
 	struct cpufreq_cooling_device *cpufreq_dev;
 
-	if (event != CPUFREQ_ADJUST)
+	if (event != CPUFREQ_INCOMPATIBLE)
 		return NOTIFY_DONE;
 
 	mutex_lock(&cooling_list_lock);
@@ -648,6 +648,7 @@ static int cpufreq_set_min_state(struct thermal_cooling_device *cdev,
 {
 	struct cpufreq_cooling_device *cpufreq_device = cdev->devdata;
 	unsigned int cpu = cpumask_any(&cpufreq_device->allowed_cpus);
+	struct cpumask policy_online_cpus;
 	unsigned int floor_freq;
 
 	if (state > cpufreq_device->max_level)
@@ -677,7 +678,10 @@ static int cpufreq_set_min_state(struct thermal_cooling_device *cdev,
 	} else {
 		floor_freq = cpufreq_device->freq_table[state];
 		cpufreq_device->floor_freq = floor_freq;
-		cpufreq_update_policy(cpu);
+		if (cpumask_and(&policy_online_cpus, cpu_online_mask,
+				cpufreq_device->policy->related_cpus))
+			cpufreq_update_policy(cpumask_first(
+						&policy_online_cpus));
 	}
 
 	return 0;
@@ -718,6 +722,7 @@ static int cpufreq_set_cur_state(struct thermal_cooling_device *cdev,
 {
 	struct cpufreq_cooling_device *cpufreq_device = cdev->devdata;
 	unsigned int cpu = cpumask_any(&cpufreq_device->allowed_cpus);
+	struct cpumask policy_online_cpus;
 	unsigned int clip_freq;
 	unsigned long prev_state;
 	struct device *cpu_dev;
@@ -771,7 +776,10 @@ update_frequency:
 			cpufreq_device->plat_ops->ceil_limit(cpu,
 						clip_freq);
 	} else {
-		cpufreq_update_policy(cpu);
+		if (cpumask_and(&policy_online_cpus, cpu_online_mask,
+				cpufreq_device->policy->related_cpus))
+			cpufreq_update_policy(cpumask_first(
+						&policy_online_cpus));
 	}
 
 	return 0;
@@ -1074,6 +1082,7 @@ __cpufreq_cooling_register(struct device_node *np,
 		goto put_policy;
 	}
 
+	cpufreq_dev->policy = policy;
 	num_cpus = cpumask_weight(clip_cpus);
 	cpufreq_dev->time_in_idle = kcalloc(num_cpus,
 					    sizeof(*cpufreq_dev->time_in_idle),

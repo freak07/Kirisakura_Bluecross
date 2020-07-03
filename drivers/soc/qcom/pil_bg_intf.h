@@ -1,4 +1,4 @@
-/* Copyright (c) 2017-2018 The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017-2018, 2020, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -23,21 +23,23 @@ enum bg_tz_commands {
 	BGPIL_IMAGE_LOAD,
 	BGPIL_AUTH_MDT,
 	BGPIL_DLOAD_CONT,
+	BGPIL_GET_BG_VERSION,
 };
 
 /* tzapp bg request.*/
-__packed struct tzapp_bg_req {
+struct tzapp_bg_req {
 	uint8_t tzapp_bg_cmd;
+	uint8_t padding[3];
 	phys_addr_t address_fw;
 	size_t size_fw;
-};
+} __attribute__ ((__packed__));
 
 /* tzapp bg response.*/
-__packed struct tzapp_bg_rsp {
+struct tzapp_bg_rsp {
 	uint32_t tzapp_bg_cmd;
 	uint32_t bg_info_len;
 	int32_t status;
 	uint32_t bg_info[100];
-};
+} __attribute__ ((__packed__));
 
 #endif

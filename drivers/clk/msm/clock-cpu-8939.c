@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2016, 2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2016, 2018-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -999,7 +999,7 @@ static int __init clock_cpu_lpm_get_latency(void)
 
 	return rc;
 }
-late_initcall(clock_cpu_lpm_get_latency);
+late_initcall_sync(clock_cpu_lpm_get_latency);
 
 #define APCS_C0_PLL			0xb116000
 #define C0_PLL_MODE			0x0
@@ -1081,7 +1081,7 @@ static int __init cpu_clock_a53_init_little(void)
 
 	/* Wait for update to take effect */
 	for (count = 500; count > 0; count--) {
-		if (!(readl_relaxed(base)) & BIT(0))
+		if (!(readl_relaxed(base) & BIT(0)))
 			break;
 		udelay(1);
 	}

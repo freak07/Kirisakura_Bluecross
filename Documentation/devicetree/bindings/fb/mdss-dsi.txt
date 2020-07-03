@@ -67,6 +67,7 @@ Optional properties:
 - qcom,mmss-ulp-clamp-ctrl-offset:	Specifies the offset for dsi ulps clamp control register.
 - qcom,mmss-phyreset-ctrl-offset:	Specifies the offset for dsi phy reset control register.
 - qcom,dsi-clk-ln-recovery:		Boolean which enables the clk lane recovery
+- qcom,mdss-skip-clamp:			Boolean which skip clamp for lanes.
 
 mdss-dsi-ctrl is a dsi controller device which is treated as a subnode of the mdss-dsi device.
 
@@ -113,6 +114,7 @@ Optional properties:
 - qcom,platform-bklight-en-gpio-invert:	Invert the gpio used to enable display back-light
 - qcom,panel-mode-gpio:			Specifies the GPIO to select video/command/single-port/dual-port
 					mode of panel through gpio when it supports these modes.
+- qcom,ext-vdd-gpio:			Specifies the GPIO to enable external VDD supply.
 - pinctrl-names:			List of names to assign mdss pin states defined in pinctrl device node
 					Refer to pinctrl-bindings.txt
 - pinctrl-<0..n>:			Lists phandles each pointing to the pin configuration node within a pin

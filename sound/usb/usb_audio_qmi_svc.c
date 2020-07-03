@@ -110,8 +110,8 @@ struct uaudio_qmi_dev {
 	unsigned long curr_xfer_buf_iova;
 	/* bit fields representing pcm card enabled */
 	unsigned long card_slot;
-	/* cache event ring phys addr */
-	u64 er_phys_addr;
+	/* indicate event ring mapped or not */
+	bool er_mapped;
 };
 
 static struct uaudio_qmi_dev *uaudio_qdev;
@@ -295,7 +295,7 @@ static unsigned long uaudio_iommu_map(enum mem_type mtype, phys_addr_t pa,
 	case MEM_EVENT_RING:
 		va = IOVA_BASE;
 		/* er already mapped */
-		if (uaudio_qdev->er_phys_addr == pa)
+		if (uaudio_qdev->er_mapped)
 			map = false;
 		break;
 	case MEM_XFER_RING:
@@ -407,8 +407,8 @@ static void uaudio_iommu_unmap(enum mem_type mtype, unsigned long va,
 
 	switch (mtype) {
 	case MEM_EVENT_RING:
-		if (uaudio_qdev->er_phys_addr)
-			uaudio_qdev->er_phys_addr = 0;
+		if (uaudio_qdev->er_mapped)
+			uaudio_qdev->er_mapped = false;
 		else
 			unmap = false;
 		break;
@@ -450,7 +450,7 @@ static int prepare_qmi_response(struct snd_usb_substream *subs,
 	struct uac_format_type_i_discrete_descriptor *fmt_v1;
 	struct uac_format_type_i_ext_descriptor *fmt_v2;
 	struct uac1_as_header_descriptor *as;
-	int ret = -ENODEV;
+	int ret;
 	int protocol, card_num, pcm_dev_num;
 	void *hdr_ptr;
 	u8 *xfer_buf;
@@ -465,6 +465,7 @@ static int prepare_qmi_response(struct snd_usb_substream *subs,
 	if (!iface) {
 		pr_err("%s: interface # %d does not exist\n", __func__,
 			subs->interface);
+		ret = -ENODEV;
 		goto err;
 	}
 
@@ -483,12 +484,14 @@ static int prepare_qmi_response(struct snd_usb_substream *subs,
 		if (!fmt) {
 			pr_err("%s: %u:%d : no UAC_FORMAT_TYPE desc\n",
 				__func__, subs->interface, subs->altset_idx);
+			ret = -ENODEV;
 			goto err;
 		}
 	}
 
 	if (!uadev[card_num].ctrl_intf) {
 		pr_err("%s: audio ctrl intf info not cached\n", __func__);
+		ret = -ENODEV;
 		goto err;
 	}
 
@@ -499,6 +502,7 @@ static int prepare_qmi_response(struct snd_usb_substream *subs,
 				NULL, UAC_HEADER);
 		if (!hdr_ptr) {
 			pr_err("%s: no UAC_HEADER desc\n", __func__);
+			ret = -ENODEV;
 			goto err;
 		}
 	}
@@ -509,6 +513,7 @@ static int prepare_qmi_response(struct snd_usb_substream *subs,
 		if (!as) {
 			pr_err("%s: %u:%d : no UAC_AS_GENERAL desc\n", __func__,
 				subs->interface, subs->altset_idx);
+			ret = -ENODEV;
 			goto err;
 		}
 		resp->data_path_delay = as->bDelay;
@@ -555,6 +560,7 @@ static int prepare_qmi_response(struct snd_usb_substream *subs,
 		resp->usb_audio_subslot_size_valid = 1;
 	} else {
 		pr_err("%s: unknown protocol version %x\n", __func__, protocol);
+		ret = -ENODEV;
 		goto err;
 	}
 
@@ -568,6 +574,7 @@ static int prepare_qmi_response(struct snd_usb_substream *subs,
 	if (!ep) {
 		pr_err("%s: data ep # %d context is null\n", __func__,
 			subs->data_endpoint->ep_num);
+		ret = -ENODEV;
 		goto err;
 	}
 	data_ep_pipe = subs->data_endpoint->pipe;
@@ -577,6 +584,7 @@ static int prepare_qmi_response(struct snd_usb_substream *subs,
 	tr_data_pa = usb_get_xfer_ring_phys_addr(subs->dev, ep, &dma);
 	if (!tr_data_pa) {
 		pr_err("%s:failed to get data ep ring dma address\n", __func__);
+		ret = -ENODEV;
 		goto err;
 	}
 
@@ -596,6 +604,7 @@ static int prepare_qmi_response(struct snd_usb_substream *subs,
 		if (!tr_sync_pa) {
 			pr_err("%s:failed to get sync ep ring dma address\n",
 				__func__);
+			ret = -ENODEV;
 			goto err;
 		}
 		resp->xhci_mem_info.tr_sync.pa = dma;
@@ -621,34 +630,42 @@ skip_sync_ep:
 			ret);
 		goto err;
 	}
+
 	xhci_pa = usb_get_sec_event_ring_phys_addr(subs->dev,
 			resp->interrupter_num, &dma);
 	if (!xhci_pa) {
 		pr_err("%s: failed to get sec event ring dma address\n",
 		__func__);
+		ret = -ENODEV;
 		goto err;
 	}
 
 	va = uaudio_iommu_map(MEM_EVENT_RING, xhci_pa, PAGE_SIZE, NULL);
-	if (!va)
+	if (!va) {
+		ret = -ENOMEM;
 		goto err;
+	}
 
 	resp->xhci_mem_info.evt_ring.va = PREPEND_SID_TO_IOVA(va,
 						uaudio_qdev->sid);
 	resp->xhci_mem_info.evt_ring.pa = dma;
 	resp->xhci_mem_info.evt_ring.size = PAGE_SIZE;
-	uaudio_qdev->er_phys_addr = xhci_pa;
+	uaudio_qdev->er_mapped = true;
 
 	resp->speed_info = get_speed_info(subs->dev->speed);
-	if (resp->speed_info == USB_AUDIO_DEVICE_SPEED_INVALID_V01)
+	if (resp->speed_info == USB_AUDIO_DEVICE_SPEED_INVALID_V01) {
+		ret = -ENODEV;
 		goto unmap_er;
+	}
 
 	resp->speed_info_valid = 1;
 
 	/* data transfer ring */
 	va = uaudio_iommu_map(MEM_XFER_RING, tr_data_pa, PAGE_SIZE, NULL);
-	if (!va)
+	if (!va) {
+		ret = -ENOMEM;
 		goto unmap_er;
+	}
 
 	tr_data_va = va;
 	resp->xhci_mem_info.tr_data.va = PREPEND_SID_TO_IOVA(va,
@@ -661,8 +678,10 @@ skip_sync_ep:
 
 	xhci_pa = resp->xhci_mem_info.tr_sync.pa;
 	va = uaudio_iommu_map(MEM_XFER_RING, tr_sync_pa, PAGE_SIZE, NULL);
-	if (!va)
+	if (!va) {
+		ret = -ENOMEM;
 		goto unmap_data;
+	}
 
 	tr_sync_va = va;
 	resp->xhci_mem_info.tr_sync.va = PREPEND_SID_TO_IOVA(va,
@@ -686,14 +705,18 @@ skip_sync:
 	}
 
 	xfer_buf = usb_alloc_coherent(subs->dev, len, GFP_KERNEL, &xfer_buf_pa);
-	if (!xfer_buf)
+	if (!xfer_buf) {
+		ret = -ENOMEM;
 		goto unmap_sync;
+	}
 
 	dma_get_sgtable(subs->dev->bus->sysdev, &sgt, xfer_buf, xfer_buf_pa,
 			len);
 	va = uaudio_iommu_map(MEM_XFER_BUF, xfer_buf_pa, len, &sgt);
-	if (!va)
+	if (!va) {
+		ret = -ENOMEM;
 		goto unmap_sync;
+	}
 
 	resp->xhci_mem_info.xfer_buff.pa = xfer_buf_pa;
 	resp->xhci_mem_info.xfer_buff.size = len;

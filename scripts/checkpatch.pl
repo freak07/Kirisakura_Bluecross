@@ -2618,7 +2618,7 @@ sub process {
 			$sig_nospace =~ s/\s//g;
 			$sig_nospace = lc($sig_nospace);
 			if (defined $signatures{$sig_nospace}) {
-				WARN("BAD_SIGN_OFF",
+				WARN("DUPLICATE_SIGN_OFF",
 				     "Duplicate signature\n" . $herecurr);
 			} else {
 				$signatures{$sig_nospace} = 1;
@@ -3010,6 +3010,10 @@ sub process {
 
 			# EFI_GUID is another special case
 			} elsif ($line =~ /^\+.*\bEFI_GUID\s*\(/) {
+				$msg_type = "";
+
+			# Long copyright statements are another special case
+			} elsif ($rawline =~ /^\+.\*.*copyright.*\(c\).*$/i) {
 				$msg_type = "";
 
 			# Otherwise set the alternate message types

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2013-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011, 2013-2020, The Linux Foundation. All rights reserved.
  * Linux Foundation chooses to take subject only to the GPLv2 license terms,
  * and distributes only under these terms.
  *
@@ -37,6 +37,7 @@
 #include <linux/device.h>
 #include <linux/delay.h>
 #include <linux/slab.h>
+#include <linux/debugfs.h>
 #include <linux/cdev.h>
 #include <linux/spinlock.h>
 #include <linux/usb/gadget.h>
@@ -57,6 +58,7 @@
 #define BRIDGE_RX_BUF_SIZE	2048
 #define BRIDGE_TX_QUEUE_SIZE	8
 #define BRIDGE_TX_BUF_SIZE	2048
+#define BRIDGE_RX_BUF_SIZE_STANDALONE  (50 * 1024)
 
 #define GS_LOG2_NOTIFY_INTERVAL		5  /* 1 << 5 == 32 msec */
 #define GS_NOTIFY_MAXPACKET		10 /* notification + 2 bytes */
@@ -134,6 +136,9 @@ struct f_cdev {
 	unsigned long		nbytes_to_host;
 	unsigned long           nbytes_to_port_bridge;
 	unsigned long		nbytes_from_port_bridge;
+
+	/* To test remote wakeup using debugfs */
+	u8 debugfs_rw_enable;
 };
 
 struct f_cdev_opts {
@@ -142,6 +147,12 @@ struct f_cdev_opts {
 	char *func_name;
 	u8 port_num;
 };
+
+struct usb_cser_debugfs {
+	struct dentry *debugfs_root;
+};
+
+static struct usb_cser_debugfs debugfs;
 
 static int major, minors;
 struct class *fcdev_classp;
@@ -155,6 +166,7 @@ static int usb_cser_connect(struct f_cdev *port);
 static void usb_cser_disconnect(struct f_cdev *port);
 static struct f_cdev *f_cdev_alloc(char *func_name, int portno);
 static void usb_cser_free_req(struct usb_ep *ep, struct usb_request *req);
+static void usb_cser_debugfs_exit(void);
 
 static struct usb_interface_descriptor cser_interface_desc = {
 	.bLength =		USB_DT_INTERFACE_SIZE,
@@ -339,6 +351,9 @@ static struct usb_gadget_strings *usb_cser_strings[] = {
 	NULL,
 };
 
+static bool standalone_mode;
+static unsigned int bridge_rx_buf_size = BRIDGE_RX_BUF_SIZE;
+
 static inline struct f_cdev *func_to_port(struct usb_function *f)
 {
 	return container_of(f, struct f_cdev, port_usb.func);
@@ -347,6 +362,23 @@ static inline struct f_cdev *func_to_port(struct usb_function *f)
 static inline struct f_cdev *cser_to_port(struct cserial *cser)
 {
 	return container_of(cser, struct f_cdev, port_usb);
+}
+
+static unsigned int convert_uart_sigs_to_acm(unsigned int uart_sig)
+{
+	unsigned int acm_sig = 0;
+
+	/* should this needs to be in calling functions ??? */
+	uart_sig &= (TIOCM_RI | TIOCM_CD | TIOCM_DSR);
+
+	if (uart_sig & TIOCM_RI)
+		acm_sig |= ACM_CTRL_RI;
+	if (uart_sig & TIOCM_CD)
+		acm_sig |= ACM_CTRL_DCD;
+	if (uart_sig & TIOCM_DSR)
+		acm_sig |= ACM_CTRL_DSR;
+
+	return acm_sig;
 }
 
 static unsigned int convert_acm_sigs_to_uart(unsigned int acm_sig)
@@ -511,6 +543,32 @@ static int usb_cser_set_alt(struct usb_function *f, unsigned int intf,
 
 	usb_cser_connect(port);
 	return rc;
+}
+
+static int usb_cser_func_suspend(struct usb_function *f, u8 options)
+{
+	bool func_wakeup_allowed;
+
+	func_wakeup_allowed =
+		((options & FUNC_SUSPEND_OPT_RW_EN_MASK) != 0);
+
+	f->func_wakeup_allowed = func_wakeup_allowed;
+	if (options & FUNC_SUSPEND_OPT_SUSP_MASK) {
+		if (!f->func_is_suspended)
+			f->func_is_suspended = true;
+	} else {
+		if (f->func_is_suspended)
+			f->func_is_suspended = false;
+	}
+	return 0;
+}
+
+static int usb_cser_get_status(struct usb_function *f)
+{
+	bool remote_wakeup_en_status = f->func_wakeup_allowed ? 1 : 0;
+
+	return (remote_wakeup_en_status << FUNC_WAKEUP_ENABLE_SHIFT) |
+		(1 << FUNC_WAKEUP_CAPABLE_SHIFT);
 }
 
 static void usb_cser_disable(struct usb_function *f)
@@ -833,6 +891,7 @@ static void cser_free_inst(struct usb_function_instance *fi)
 		cdev_del(&opts->port->fcdev_cdev);
 	}
 	usb_cser_chardev_deinit();
+	usb_cser_debugfs_exit();
 	kfree(opts->func_name);
 	kfree(opts->port);
 	kfree(opts);
@@ -897,7 +956,7 @@ static void usb_cser_start_rx(struct f_cdev *port)
 
 		req = list_entry(pool->next, struct usb_request, list);
 		list_del_init(&req->list);
-		req->length = BRIDGE_RX_BUF_SIZE;
+		req->length = bridge_rx_buf_size;
 		req->complete = usb_cser_read_complete;
 		spin_unlock_irqrestore(&port->port_lock, flags);
 		ret = usb_ep_queue(ep, req, GFP_KERNEL);
@@ -991,7 +1050,7 @@ static void usb_cser_start_io(struct f_cdev *port)
 
 	ret = usb_cser_alloc_requests(port->port_usb.out,
 				&port->read_pool,
-				BRIDGE_RX_QUEUE_SIZE, BRIDGE_RX_BUF_SIZE, 0,
+				BRIDGE_RX_QUEUE_SIZE, bridge_rx_buf_size, 0,
 				usb_cser_read_complete);
 	if (ret) {
 		pr_err("unable to allocate out requests\n");
@@ -1192,6 +1251,8 @@ ssize_t f_cdev_read(struct file *file,
 			current_rx_req = NULL;
 			current_rx_buf = NULL;
 		}
+		if (standalone_mode)
+			break;
 	}
 
 	port->pending_rx_bytes = pending_rx_bytes;
@@ -1333,6 +1394,12 @@ static int f_cdev_tiocmget(struct f_cdev *port)
 
 	if (cser->serial_state & TIOCM_RI)
 		result |= TIOCM_RI;
+
+	if (cser->serial_state & TIOCM_DSR)
+		result |= TIOCM_DSR;
+
+	if (cser->serial_state & TIOCM_CTS)
+		result |= TIOCM_CTS;
 	return result;
 }
 
@@ -1373,6 +1440,24 @@ static int f_cdev_tiocmset(struct f_cdev *port,
 		}
 	}
 
+	if (set & TIOCM_DSR)
+		cser->serial_state |= TIOCM_DSR;
+
+	if (clear & TIOCM_DSR)
+		cser->serial_state &= ~TIOCM_DSR;
+
+	if (set & TIOCM_CTS) {
+		if (cser->send_break) {
+			cser->serial_state |= TIOCM_CTS;
+			status = cser->send_break(cser, 0);
+		}
+	}
+	if (clear & TIOCM_CTS) {
+		if (cser->send_break) {
+			cser->serial_state &= ~TIOCM_CTS;
+			status = cser->send_break(cser, 1);
+		}
+	}
 	return status;
 }
 
@@ -1423,7 +1508,9 @@ static void usb_cser_notify_modem(void *fport, int ctrl_bits)
 {
 	int temp;
 	struct f_cdev *port = fport;
+	struct cserial *cser;
 
+	cser = &port->port_usb;
 	if (!port) {
 		pr_err("port is null\n");
 		return;
@@ -1438,6 +1525,17 @@ static void usb_cser_notify_modem(void *fport, int ctrl_bits)
 
 	port->cbits_to_modem = temp;
 	port->cbits_updated = true;
+
+	 /* if DTR is high, update latest modem info to laptop */
+	if (port->cbits_to_modem & TIOCM_DTR) {
+		unsigned int result;
+		unsigned int cbits_to_laptop;
+
+		result = f_cdev_tiocmget(port);
+		cbits_to_laptop = convert_uart_sigs_to_acm(result);
+		if (cser->send_modem_ctrl_bits)
+			cser->send_modem_ctrl_bits(cser, cbits_to_laptop);
+	}
 
 	wake_up(&port->read_wq);
 }
@@ -1516,6 +1614,119 @@ static const struct file_operations f_cdev_fops = {
 	.compat_ioctl = f_cdev_ioctl,
 };
 
+static ssize_t cser_rw_write(struct file *file, const char __user *ubuf,
+				size_t count, loff_t *ppos)
+{
+	struct seq_file *s = file->private_data;
+	struct f_cdev *port = s->private;
+	u8 input;
+	struct cserial *cser;
+	struct usb_function *func;
+	struct usb_gadget *gadget;
+	int ret;
+
+	cser = &port->port_usb;
+	if (!cser) {
+		pr_err("cser is NULL\n");
+		return -EINVAL;
+	}
+
+	if (!port->is_connected) {
+		pr_debug("port disconnected\n");
+		return -ENODEV;
+	}
+
+	func = &cser->func;
+	if (!func) {
+		pr_err("func is NULL\n");
+		return -EINVAL;
+	}
+
+	if (ubuf == NULL) {
+		pr_debug("buffer is Null.\n");
+		goto err;
+	}
+
+	ret = kstrtou8_from_user(ubuf, count, 0, &input);
+	if (ret) {
+		pr_err("Invalid value. err:%d\n", ret);
+		goto err;
+	}
+
+	if (port->debugfs_rw_enable == !!input) {
+		if (!!input)
+			pr_debug("RW already enabled\n");
+		else
+			pr_debug("RW already disabled\n");
+		goto err;
+	}
+
+	port->debugfs_rw_enable = !!input;
+	if (port->debugfs_rw_enable) {
+		gadget = cser->func.config->cdev->gadget;
+		if (gadget->speed == USB_SPEED_SUPER &&
+			func->func_is_suspended) {
+			pr_debug("Calling usb_func_wakeup\n");
+			ret = usb_func_wakeup(func);
+		} else {
+			pr_debug("Calling usb_gadget_wakeup");
+			ret = usb_gadget_wakeup(gadget);
+		}
+
+		if ((ret == -EBUSY) || (ret == -EAGAIN))
+			pr_debug("RW delayed due to LPM exit.");
+		else if (ret)
+			pr_err("wakeup failed. ret=%d.", ret);
+	} else {
+		pr_debug("RW disabled.");
+	}
+err:
+	return count;
+}
+
+static int usb_cser_rw_show(struct seq_file *s, void *unused)
+{
+	struct f_cdev *port = s->private;
+
+	if (!port) {
+		pr_err("port is null\n");
+		return 0;
+	}
+
+	seq_printf(s, "%d\n", port->debugfs_rw_enable);
+
+	return 0;
+}
+
+static int debug_cdev_rw_open(struct inode *inode, struct file *f)
+{
+	return single_open(f, usb_cser_rw_show, inode->i_private);
+}
+
+static const struct file_operations cser_rem_wakeup_fops = {
+	.open = debug_cdev_rw_open,
+	.read = seq_read,
+	.write = cser_rw_write,
+	.owner = THIS_MODULE,
+	.llseek = seq_lseek,
+	.release = seq_release,
+};
+
+static void usb_cser_debugfs_init(struct f_cdev *port)
+{
+	debugfs.debugfs_root = debugfs_create_dir(port->name, NULL);
+	if (IS_ERR(debugfs.debugfs_root))
+		return;
+
+	debugfs_create_file("remote_wakeup", 0600,
+			debugfs.debugfs_root, port, &cser_rem_wakeup_fops);
+}
+
+static void usb_cser_debugfs_exit(void)
+{
+	debugfs_remove_recursive(debugfs.debugfs_root);
+}
+
 static struct f_cdev *f_cdev_alloc(char *func_name, int portno)
 {
 	int ret;
@@ -1582,6 +1793,8 @@ static struct f_cdev *f_cdev_alloc(char *func_name, int portno)
 		ret = PTR_ERR(device);
 		goto err_create_dev;
 	}
+
+	usb_cser_debugfs_init(port);
 
 	pr_info("port_name:%s (%pK) portno:(%d)\n",
 			port->name, port, port->port_num);
@@ -1845,10 +2058,34 @@ static struct usb_function *cser_alloc(struct usb_function_instance *fi)
 	port->port_usb.func.set_alt = usb_cser_set_alt;
 	port->port_usb.func.disable = usb_cser_disable;
 	port->port_usb.func.setup = usb_cser_setup;
+	port->port_usb.func.func_suspend = usb_cser_func_suspend;
+	port->port_usb.func.get_status = usb_cser_get_status;
 	port->port_usb.func.free_func = usb_cser_free_func;
 
 	return &port->port_usb.func;
 }
+
+static int __init f_cdev_init(void)
+{
+	char *cmdline;
+
+	cmdline = strnstr(boot_command_line,
+			"msm_drm.dsi_display0=dsi_sim_vid_display",
+	strlen(boot_command_line));
+	if (cmdline) {
+		pr_debug("%s tethered mode cmdline:%s\n",
+				__func__, cmdline);
+		standalone_mode = false;
+		bridge_rx_buf_size = BRIDGE_RX_BUF_SIZE;
+	} else {
+		pr_debug("%s standalone mode cmdline:\n",
+				__func__);
+		standalone_mode = true;
+		bridge_rx_buf_size = BRIDGE_RX_BUF_SIZE_STANDALONE;
+	}
+	return 0;
+}
+device_initcall(f_cdev_init);
 
 DECLARE_USB_FUNCTION_INIT(cser, cser_alloc_inst, cser_alloc);
 MODULE_DESCRIPTION("USB Serial Character Driver");

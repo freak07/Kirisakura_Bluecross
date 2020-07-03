@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -60,7 +60,7 @@
 #define QMI_STATE_MIN_VAL QMI_SERVREG_NOTIF_SERVICE_STATE_ENUM_TYPE_MIN_VAL_V01
 #define QMI_STATE_MAX_VAL QMI_SERVREG_NOTIF_SERVICE_STATE_ENUM_TYPE_MAX_VAL_V01
 
-#define SERVER_TIMEOUT				500
+#define SERVER_TIMEOUT				3000
 #define MAX_STRING_LEN				100
 
 /*
@@ -99,6 +99,7 @@ struct ind_req_resp {
  */
 struct qmi_client_info {
 	int instance_id;
+	char service_path[SERVREG_NOTIF_NAME_LENGTH];
 	enum pd_subsys_state subsys_state;
 	struct work_struct svc_arrive;
 	struct work_struct svc_exit;
@@ -391,7 +392,8 @@ static void root_service_service_arrive(struct work_struct *work)
 	mutex_lock(&notif_add_lock);
 	mutex_lock(&service_list_lock);
 	list_for_each_entry(service_notif, &service_list, list) {
-		if (service_notif->instance_id == data->instance_id) {
+		if (service_notif->instance_id == data->instance_id && !strcmp
+			(service_notif->service_path, data->service_path)) {
 			enum pd_subsys_state state = ROOT_PD_UP;
 			rc = register_notif_listener(service_notif, data,
 								&curr_state);
@@ -425,7 +427,8 @@ static void root_service_service_exit(struct qmi_client_info *data,
 	mutex_lock(&notif_add_lock);
 	mutex_lock(&service_list_lock);
 	list_for_each_entry(service_notif, &service_list, list) {
-		if (service_notif->instance_id == data->instance_id) {
+		if (service_notif->instance_id == data->instance_id && !strcmp
+			(data->service_path, service_notif->service_path)) {
 			rc = service_notif_queue_notification(service_notif,
 					SERVREG_NOTIF_SERVICE_STATE_DOWN_V01,
 					&state);
@@ -535,7 +538,8 @@ static void *add_service_notif(const char *service_path, int instance_id,
 	 */
 	mutex_lock(&qmi_list_lock);
 	list_for_each_entry(tmp, &qmi_client_list, list) {
-		if (tmp->instance_id == instance_id) {
+		if (tmp->instance_id == instance_id && !strcmp
+				(tmp->service_path, service_path)) {
 			if (tmp->service_connected) {
 				rc = register_notif_listener(service_notif, tmp,
 								curr_state);
@@ -561,6 +565,8 @@ static void *add_service_notif(const char *service_path, int instance_id,
 	}
 
 	qmi_data->instance_id = instance_id;
+	strlcpy(qmi_data->service_path, service_path,
+		ARRAY_SIZE(service_notif->service_path));
 	init_rwsem(&qmi_data->qmi_client_handle_rwlock);
 	qmi_data->clnt_handle = NULL;
 	qmi_data->notifier.notifier_call = service_event_notify;
@@ -681,7 +687,8 @@ int service_notif_pd_restart(const char *service_path, int instance_id)
 	int rc = 0;
 
 	list_for_each_entry(tmp, &qmi_client_list, list) {
-		if (tmp->instance_id == instance_id) {
+		if (tmp->instance_id == instance_id && !strcmp
+				(tmp->service_path, service_path)) {
 			if (tmp->service_connected) {
 				pr_info("Restarting service %s, instance-id %d\n",
 						service_path, instance_id);

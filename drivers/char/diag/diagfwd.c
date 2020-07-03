@@ -48,6 +48,7 @@
 #define STM_RSP_SUPPORTED_INDEX		7
 #define STM_RSP_STATUS_INDEX		8
 #define STM_RSP_NUM_BYTES		9
+#define RETRY_MAX_COUNT		1000
 
 struct diag_md_hdlc_reset_work {
 	int pid;
@@ -277,28 +278,22 @@ static void pack_rsp_and_send(unsigned char *buf, int len,
 	 * if its supporting qshrink4 feature.
 	 */
 	if (info && info->peripheral_mask) {
-		if (info->peripheral_mask == DIAG_CON_ALL ||
-			(info->peripheral_mask & (1 << APPS_DATA)) ||
-			(info->peripheral_mask & (1 << PERIPHERAL_MODEM))) {
-			rsp_ctxt = SET_BUF_CTXT(APPS_DATA, TYPE_CMD, 1);
-		} else {
-			for (i = 0; i < NUM_MD_SESSIONS; i++) {
-				if (info->peripheral_mask & (1 << i))
-					break;
-			}
-		rsp_ctxt = SET_BUF_CTXT(i, TYPE_CMD, 1);
+		for (i = 0; i < NUM_MD_SESSIONS; i++) {
+			if (info->peripheral_mask & (1 << i))
+				break;
 		}
+		rsp_ctxt = SET_BUF_CTXT(i, TYPE_CMD, TYPE_CMD);
 	} else
 		rsp_ctxt = driver->rsp_buf_ctxt;
 	mutex_unlock(&driver->md_session_lock);
 
 	/*
 	 * Keep trying till we get the buffer back. It should probably
-	 * take one or two iterations. When this loops till UINT_MAX, it
+	 * take one or two iterations. When this loops till RETRY_MAX_COUNT, it
 	 * means we did not get a write complete for the previous
 	 * response.
 	 */
-	while (retry_count < UINT_MAX) {
+	while (retry_count < RETRY_MAX_COUNT) {
 		if (!driver->rsp_buf_busy)
 			break;
 		/*
@@ -376,27 +371,21 @@ static void encode_rsp_and_send(unsigned char *buf, int len,
 	 * if its supporting qshrink4 feature.
 	 */
 	if (info && info->peripheral_mask) {
-		if (info->peripheral_mask == DIAG_CON_ALL ||
-			(info->peripheral_mask & (1 << APPS_DATA)) ||
-			(info->peripheral_mask & (1 << PERIPHERAL_MODEM))) {
-			rsp_ctxt = SET_BUF_CTXT(APPS_DATA, TYPE_CMD, 1);
-		} else {
-			for (i = 0; i < NUM_MD_SESSIONS; i++) {
-				if (info->peripheral_mask & (1 << i))
-					break;
-			}
-		rsp_ctxt = SET_BUF_CTXT(i, TYPE_CMD, 1);
+		for (i = 0; i < NUM_MD_SESSIONS; i++) {
+			if (info->peripheral_mask & (1 << i))
+				break;
 		}
+		rsp_ctxt = SET_BUF_CTXT(i, TYPE_CMD, TYPE_CMD);
 	} else
 		rsp_ctxt = driver->rsp_buf_ctxt;
 	mutex_unlock(&driver->md_session_lock);
 	/*
 	 * Keep trying till we get the buffer back. It should probably
-	 * take one or two iterations. When this loops till UINT_MAX, it
+	 * take one or two iterations. When this loops till RETRY_MAX_COUNT, it
 	 * means we did not get a write complete for the previous
 	 * response.
 	 */
-	while (retry_count < UINT_MAX) {
+	while (retry_count < RETRY_MAX_COUNT) {
 		if (!driver->rsp_buf_busy)
 			break;
 		/*
@@ -602,7 +591,7 @@ void diag_process_stm_mask(uint8_t cmd, uint8_t data_mask, int data_type)
 	}
 }
 
-int diag_process_stm_cmd(unsigned char *buf, unsigned char *dest_buf)
+int diag_process_stm_cmd(unsigned char *buf, int len, unsigned char *dest_buf)
 {
 	uint8_t version, mask, cmd;
 	uint8_t rsp_supported = 0;
@@ -614,7 +603,11 @@ int diag_process_stm_cmd(unsigned char *buf, unsigned char *dest_buf)
 		       buf, dest_buf, __func__);
 		return -EIO;
 	}
-
+	if (len < STM_CMD_NUM_BYTES) {
+		pr_err("diag: Invalid buffer length: %d in %s\n", len,
+			__func__);
+		return -EINVAL;
+	}
 	version = *(buf + STM_CMD_VERSION_OFFSET);
 	mask = *(buf + STM_CMD_MASK_OFFSET);
 	cmd = *(buf + STM_CMD_DATA_OFFSET);
@@ -1129,12 +1122,13 @@ int diag_process_apps_pkt(unsigned char *buf, int len, int pid)
 	} else if ((len >= ((2 * sizeof(uint8_t)) + sizeof(uint16_t))) &&
 		(*buf == 0x4b) && (*(buf+1) == 0x12) &&
 		(*(uint16_t *)(buf+2) == DIAG_DIAG_STM)) {
-		len = diag_process_stm_cmd(buf, driver->apps_rsp_buf);
-		if (len > 0) {
-			diag_send_rsp(driver->apps_rsp_buf, len, pid);
+		write_len = diag_process_stm_cmd(buf, len,
+			driver->apps_rsp_buf);
+		if (write_len > 0) {
+			diag_send_rsp(driver->apps_rsp_buf, write_len, pid);
 			return 0;
 		}
-		return len;
+		return write_len;
 	}
 	/* Check for time sync query command */
 	else if ((len >= ((2 * sizeof(uint8_t)) + sizeof(uint16_t))) &&
@@ -1419,6 +1413,9 @@ int diagfwd_mux_open(int id, int mode)
 		break;
 	case DIAG_MEMORY_DEVICE_MODE:
 		break;
+	case DIAG_PCIE_MODE:
+		driver->pcie_connected = 1;
+		break;
 	default:
 		return -EINVAL;
 	}
@@ -1451,6 +1448,9 @@ int diagfwd_mux_close(int id, int mode)
 		driver->usb_connected = 0;
 		break;
 	case DIAG_MEMORY_DEVICE_MODE:
+		break;
+	case DIAG_PCIE_MODE:
+		driver->pcie_connected = 0;
 		break;
 	default:
 		return -EINVAL;
@@ -1750,7 +1750,7 @@ void diag_process_non_hdlc_pkt(unsigned char *buf, int len, int pid)
 		if (*(uint8_t *)(data_ptr + actual_pkt->length) !=
 						CONTROL_CHAR) {
 			mutex_unlock(&driver->hdlc_recovery_mutex);
-			diag_hdlc_start_recovery(buf, len, pid);
+			diag_hdlc_start_recovery(buf, (len - read_bytes), pid);
 			mutex_lock(&driver->hdlc_recovery_mutex);
 		}
 		err = diag_process_apps_pkt(data_ptr,
@@ -1776,8 +1776,8 @@ start:
 		pkt_len = actual_pkt->length;
 
 		if (actual_pkt->start != CONTROL_CHAR) {
-			diag_hdlc_start_recovery(buf, len, pid);
-			diag_send_error_rsp(buf, len, pid);
+			diag_hdlc_start_recovery(buf, (len - read_bytes), pid);
+			diag_send_error_rsp(buf, (len - read_bytes), pid);
 			goto end;
 		}
 		mutex_lock(&driver->hdlc_recovery_mutex);
@@ -1785,7 +1785,7 @@ start:
 			pr_err("diag: In %s, incoming data is too large for the request buffer %d\n",
 			       __func__, pkt_len);
 			mutex_unlock(&driver->hdlc_recovery_mutex);
-			diag_hdlc_start_recovery(buf, len, pid);
+			diag_hdlc_start_recovery(buf, (len - read_bytes), pid);
 			break;
 		}
 		if ((pkt_len + header_len) > (len - read_bytes)) {
@@ -1802,7 +1802,7 @@ start:
 		if (*(uint8_t *)(data_ptr + actual_pkt->length) !=
 						CONTROL_CHAR) {
 			mutex_unlock(&driver->hdlc_recovery_mutex);
-			diag_hdlc_start_recovery(buf, len, pid);
+			diag_hdlc_start_recovery(buf, (len - read_bytes), pid);
 			mutex_lock(&driver->hdlc_recovery_mutex);
 		}
 		else
@@ -1870,14 +1870,18 @@ static int diagfwd_mux_write_done(unsigned char *buf, int len, int buf_ctxt,
 		}
 		break;
 	case TYPE_CMD:
-		if (peripheral >= 0 && peripheral < NUM_PERIPHERALS) {
+		if (peripheral >= 0 && peripheral < NUM_PERIPHERALS &&
+			num != TYPE_CMD) {
 			DIAG_LOG(DIAG_DEBUG_PERIPHERALS,
 			"Marking buffer as free after write done p: %d, t: %d, buf_num: %d\n",
-				peripheral, type, num);
+			peripheral, type, num);
 			diagfwd_write_done(peripheral, type, num);
-		}
-		if (peripheral == APPS_DATA ||
-				ctxt == DIAG_MEMORY_DEVICE_MODE) {
+		} else if (peripheral == APPS_DATA ||
+			(peripheral >= 0 && peripheral < NUM_PERIPHERALS &&
+			num == TYPE_CMD)) {
+			DIAG_LOG(DIAG_DEBUG_PERIPHERALS,
+			"Marking APPS response buffer free after write done for p: %d, t: %d, buf_num: %d\n",
+			peripheral, type, num);
 			spin_lock_irqsave(&driver->rsp_buf_busy_lock, flags);
 			driver->rsp_buf_busy = 0;
 			driver->encoded_rsp_len = 0;

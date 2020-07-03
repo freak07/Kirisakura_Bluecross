@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -363,6 +363,7 @@ static struct qpnp_adc_tm_reverse_scale_fn adc_tm_rscale_fn[] = {
 	[SCALE_R_ABSOLUTE] = {qpnp_adc_absolute_rthr},
 	[SCALE_QRD_SKUH_RBATT_THERM] = {qpnp_adc_qrd_skuh_btm_scaler},
 	[SCALE_QRD_SKUT1_RBATT_THERM] = {qpnp_adc_qrd_skut1_btm_scaler},
+	[SCALE_QRD_215_RBATT_THERM] = {qpnp_adc_qrd_215_btm_scaler},
 };
 
 static int32_t qpnp_adc_tm_read_reg(struct qpnp_adc_tm_chip *chip,
@@ -3270,7 +3271,7 @@ static int qpnp_adc_tm_probe(struct platform_device *pdev)
 	} else {
 		rc = devm_request_irq(&pdev->dev, chip->adc->adc_irq_eoc,
 				qpnp_adc_tm_rc_thr_isr,
-			IRQF_TRIGGER_HIGH, "qpnp_adc_tm_interrupt", chip);
+			IRQF_TRIGGER_RISING, "qpnp_adc_tm_interrupt", chip);
 		if (rc)
 			dev_err(&pdev->dev, "failed to request adc irq\n");
 		else

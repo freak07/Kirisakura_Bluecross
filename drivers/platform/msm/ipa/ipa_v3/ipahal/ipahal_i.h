@@ -1,4 +1,4 @@
-/* Copyright (c) 2016-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2016-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -46,15 +46,6 @@
 			IPAHAL_DRV_NAME " %s:%d " fmt, ## args); \
 	} while (0)
 
-#define IPAHAL_DBG_REG(fmt, args...) \
-	do { \
-		pr_err(fmt, ## args); \
-		IPA_IPC_LOGGING(ipa_get_ipc_logbuf(), \
-			" %s:%d " fmt, ## args); \
-		IPA_IPC_LOGGING(ipa_get_ipc_logbuf_low(), \
-			" %s:%d " fmt, ## args); \
-	} while (0)
-
 #define IPAHAL_ERR_RL(fmt, args...) \
 		do { \
 			pr_err_ratelimited_ipa(IPAHAL_DRV_NAME " %s:%d " fmt, \
@@ -65,8 +56,23 @@
 				IPAHAL_DRV_NAME " %s:%d " fmt, ## args); \
 		} while (0)
 
+#define IPAHAL_DBG_REG(fmt, args...) \
+	do { \
+		pr_err(fmt, ## args); \
+		IPA_IPC_LOGGING(ipahal_ctx->regdumpbuf, \
+			" %s:%d " fmt, ## args); \
+	} while (0)
+
+#define IPAHAL_DBG_REG_IPC_ONLY(fmt, args...) \
+	do { \
+		IPA_IPC_LOGGING(ipahal_ctx->regdumpbuf, \
+			" %s:%d " fmt, ## args); \
+	} while (0)
+
 #define IPAHAL_MEM_ALLOC(__size, __is_atomic_ctx) \
 	(kzalloc((__size), ((__is_atomic_ctx) ? GFP_ATOMIC : GFP_KERNEL)))
+
+#define IPAHAL_IPC_LOG_PAGES 50
 
 /*
  * struct ipahal_context - HAL global context data
@@ -84,6 +90,7 @@ struct ipahal_context {
 	struct dentry *dent;
 	struct device *ipa_pdev;
 	struct ipa_mem_buffer empty_fltrt_tbl;
+	void *regdumpbuf;
 };
 
 extern struct ipahal_context *ipahal_ctx;
@@ -605,12 +612,15 @@ struct ipa_pkt_status_hw {
 /* Headers and processing context H/W structures and definitions */
 
 /* uCP command numbers */
-#define IPA_HDR_UCP_802_3_TO_802_3 6
-#define IPA_HDR_UCP_802_3_TO_ETHII 7
-#define IPA_HDR_UCP_ETHII_TO_802_3 8
-#define IPA_HDR_UCP_ETHII_TO_ETHII 9
-#define IPA_HDR_UCP_L2TP_HEADER_ADD 10
-#define IPA_HDR_UCP_L2TP_HEADER_REMOVE 11
+#define IPA_HDR_UCP_802_3_TO_802_3		6
+#define IPA_HDR_UCP_802_3_TO_ETHII		7
+#define IPA_HDR_UCP_ETHII_TO_802_3		8
+#define IPA_HDR_UCP_ETHII_TO_ETHII		9
+#define IPA_HDR_UCP_L2TP_HEADER_ADD		10
+#define IPA_HDR_UCP_L2TP_HEADER_REMOVE		11
+#define IPA_HDR_UCP_L2TP_UDP_HEADER_ADD	12
+#define IPA_HDR_UCP_L2TP_UDP_HEADER_REMOVE	13
+#define IPA_HDR_UCP_ETHII_TO_ETHII_EX		14
 
 /* Processing context TLV type */
 #define IPA_PROC_CTX_TLV_TYPE_END 0
@@ -720,6 +730,30 @@ struct ipa_hw_hdr_proc_ctx_add_l2tp_hdr_cmd_seq {
 struct ipa_hw_hdr_proc_ctx_remove_l2tp_hdr_cmd_seq {
 	struct ipa_hw_hdr_proc_ctx_hdr_add hdr_add;
 	struct ipa_hw_hdr_proc_ctx_l2tp_remove_hdr l2tp_params;
+	struct ipa_hw_hdr_proc_ctx_tlv end;
+};
+
+/**
+ * struct ipa_hw_hdr_proc_ctx_add_hdr_ex -
+ * HW structure of IPA processing context - add generic header
+ * @tlv: IPA processing context TLV
+ * @params: generic eth2 to eth2 parameters
+ */
+struct ipa_hw_hdr_proc_ctx_add_hdr_ex {
+	struct ipa_hw_hdr_proc_ctx_tlv tlv;
+	struct ipa_eth_II_to_eth_II_ex_procparams params;
+};
+
+/**
+ * struct ipa_hw_hdr_proc_ctx_add_hdr_cmd_seq_ex -
+ * IPA processing context header - process command sequence
+ * @hdr_add: add header command
+ * @params: params for header generic header add
+ * @end: tlv end command (cmd.type must be 0)
+ */
+struct ipa_hw_hdr_proc_ctx_add_hdr_cmd_seq_ex {
+	struct ipa_hw_hdr_proc_ctx_hdr_add hdr_add;
+	struct ipa_hw_hdr_proc_ctx_add_hdr_ex hdr_add_ex;
 	struct ipa_hw_hdr_proc_ctx_tlv end;
 };
 

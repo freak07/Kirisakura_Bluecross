@@ -119,10 +119,17 @@ void __check_vmalloc_seq(struct mm_struct *mm)
 
 	do {
 		seq = init_mm.context.vmalloc_seq;
+#ifdef CONFIG_ENABLE_VMALLOC_SAVING
+		memcpy(pgd_offset(mm, PAGE_OFFSET),
+		       pgd_offset_k(PAGE_OFFSET),
+		       sizeof(pgd_t) * (pgd_index(VMALLOC_END) -
+					pgd_index(PAGE_OFFSET)));
+#else
 		memcpy(pgd_offset(mm, VMALLOC_START),
 		       pgd_offset_k(VMALLOC_START),
 		       sizeof(pgd_t) * (pgd_index(VMALLOC_END) -
 					pgd_index(VMALLOC_START)));
+#endif
 		mm->context.vmalloc_seq = seq;
 	} while (seq != init_mm.context.vmalloc_seq);
 }
@@ -265,6 +272,7 @@ static void __iomem * __arm_ioremap_pfn_caller(unsigned long pfn,
 	unsigned long addr;
 	struct vm_struct *area;
 	phys_addr_t paddr = __pfn_to_phys(pfn);
+	pgprot_t prot;
 
 #ifndef CONFIG_ARM_LPAE
 	/*
@@ -310,6 +318,12 @@ static void __iomem * __arm_ioremap_pfn_caller(unsigned long pfn,
  	addr = (unsigned long)area->addr;
 	area->phys_addr = paddr;
 
+	prot = __pgprot(type->prot_pte);
+#ifdef CONFIG_ARCH_MSM8953_SOC_SETTINGS
+	if (paddr >= MSM8953_TLMM_START_ADDR &&
+	    paddr <= MSM8953_TLMM_END_ADDR)
+		prot = pgprot_stronglyordered(type->prot_pte);
+#endif
 #if !defined(CONFIG_SMP) && !defined(CONFIG_ARM_LPAE)
 	if (DOMAIN_IO == 0 &&
 	    (((cpu_architecture() >= CPU_ARCH_ARMv6) && (get_cr() & CR_XP)) ||
@@ -322,8 +336,7 @@ static void __iomem * __arm_ioremap_pfn_caller(unsigned long pfn,
 		err = remap_area_sections(addr, pfn, size, type);
 	} else
 #endif
-		err = ioremap_page_range(addr, addr + size, paddr,
-					 __pgprot(type->prot_pte));
+		err = ioremap_page_range(addr, addr + size, paddr, prot);
 
 	if (err) {
  		vunmap((void *)addr);

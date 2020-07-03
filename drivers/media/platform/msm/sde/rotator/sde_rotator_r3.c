@@ -1496,7 +1496,7 @@ static void sde_hw_rotator_setup_wbengine(struct sde_hw_rotator_context *ctx,
 			(fmt->bits[C0_G_Y] << 0);
 
 	/* alpha control */
-	if (fmt->bits[C3_ALPHA] || fmt->alpha_enable) {
+	if (fmt->alpha_enable || (!fmt->is_yuv && (fmt->unpack_count == 4))) {
 		dst_format |= BIT(8);
 		if (!fmt->alpha_enable) {
 			dst_format |= BIT(14);
@@ -3368,6 +3368,8 @@ static ssize_t sde_hw_rotator_show_caps(struct sde_rot_mgr *mgr,
 
 	if (hw_data->downscale_caps)
 		SPRINT("downscale_ratios=%s\n", hw_data->downscale_caps);
+
+	SPRINT("max_line_width=%d\n", sde_rotator_get_maxlinewidth(mgr));
 
 #undef SPRINT
 	return cnt;

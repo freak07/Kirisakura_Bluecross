@@ -75,9 +75,10 @@ static int system_sleep_enter(struct cpumask *mask)
 /**
  * system_sleep_exit() - Activities done when exiting system low power modes
  */
-static void system_sleep_exit(void)
+static void system_sleep_exit(bool success)
 {
-	msm_rpmh_master_stats_update();
+	if (success)
+		msm_rpmh_master_stats_update();
 	gic_v3_dist_restore();
 }
 
@@ -106,6 +107,7 @@ static struct platform_driver sys_pm_driver = {
 	.probe = sys_pm_probe,
 	.driver = {
 		.name = KBUILD_MODNAME,
+		.suppress_bind_attrs = true,
 		.of_match_table = sys_pm_drv_match,
 	},
 };

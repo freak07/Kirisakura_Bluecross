@@ -869,12 +869,13 @@ static int lan78xx_read_otp(struct lan78xx_net *dev, u32 offset,
 	ret = lan78xx_read_raw_otp(dev, 0, 1, &sig);
 
 	if (ret == 0) {
-		if (sig == OTP_INDICATOR_1)
-			offset = (u32)offset;
-		else if (sig == OTP_INDICATOR_2)
-			offset += 0x100;
-		else
-			ret = -EINVAL;
+		if (sig != OTP_INDICATOR_1) {
+			if (sig == OTP_INDICATOR_2)
+				offset += 0x100;
+			else
+				ret = -EINVAL;
+		}
+
 		if (!ret)
 			ret = lan78xx_read_raw_otp(dev, offset, length, data);
 	}
@@ -1672,7 +1673,12 @@ static void lan78xx_init_mac_address(struct lan78xx_net *dev)
 		ret = lan78xx_write_reg(dev, RX_ADDRL, addr_lo);
 		ret = lan78xx_write_reg(dev, RX_ADDRH, addr_hi);
 	}
+	addr_lo = addr[0] | (addr[1] << 8) |
+	(addr[2] << 16) | (addr[3] << 24);
+	addr_hi = addr[4] | (addr[5] << 8);
 
+	ret = lan78xx_write_reg(dev, RX_ADDRL, addr_lo);
+	ret = lan78xx_write_reg(dev, RX_ADDRH, addr_hi);
 	ret = lan78xx_write_reg(dev, MAF_LO(0), addr_lo);
 	ret = lan78xx_write_reg(dev, MAF_HI(0), addr_hi | MAF_HI_VALID_);
 

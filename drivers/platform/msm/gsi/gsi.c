@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2018, 2020, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -944,6 +944,9 @@ int gsi_register_device(struct gsi_per_props *props, unsigned long *dev_hdl)
 	__gsi_config_gen_irq(props->ee, ~0,
 		~GSI_EE_n_CNTXT_GSI_IRQ_CLR_GSI_BREAK_POINT_BMSK);
 
+	gsi_ctx->shared_ch_info.ch_id = gsi_ctx->max_ch;
+	gsi_ctx->shared_ch_info.evchid = gsi_ctx->max_ev;
+
 	gsi_writel(props->intr, gsi_ctx->base +
 			GSI_EE_n_CNTXT_INTSET_OFFS(gsi_ctx->per.ee));
 
@@ -1801,7 +1804,8 @@ int gsi_alloc_channel(struct gsi_chan_props *props, unsigned long dev_hdl,
 
 		if (atomic_read(
 			&gsi_ctx->evtr[props->evt_ring_hdl].chan_ref_cnt) &&
-			gsi_ctx->evtr[props->evt_ring_hdl].props.exclusive) {
+			gsi_ctx->evtr[props->evt_ring_hdl].props.exclusive &&
+			!props->common_evt_ring) {
 			GSIERR("evt ring=%lu exclusively used by chan_hdl=%p\n",
 				props->evt_ring_hdl, chan_hdl);
 			return -GSI_STATUS_UNSUPPORTED_OP;
@@ -1870,12 +1874,42 @@ int gsi_alloc_channel(struct gsi_chan_props *props, unsigned long dev_hdl,
 	ctx->user_data = user_data;
 	*chan_hdl = props->ch_id;
 	ctx->allocated = true;
+	if ((props->evt_ring_hdl != ~0) && props->common_evt_ring) {
+		gsi_ctx->shared_ch_info.ch_id = props->ch_id;
+		gsi_ctx->shared_ch_info.evchid = props->evt_ring_hdl;
+	}
 	ctx->stats.dp.last_timestamp = jiffies_to_msecs(jiffies);
 	atomic_inc(&gsi_ctx->num_chan);
 
 	return GSI_STATUS_SUCCESS;
 }
 EXPORT_SYMBOL(gsi_alloc_channel);
+
+static void __gsi_read_channel_scratch(unsigned long chan_hdl,
+		union __packed gsi_channel_scratch * val)
+{
+	uint32_t reg;
+
+	reg = gsi_readl(gsi_ctx->base +
+		GSI_EE_n_GSI_CH_k_SCRATCH_0_OFFS(chan_hdl,
+			gsi_ctx->per.ee));
+	val->data.word1 = reg;
+
+	reg = gsi_readl(gsi_ctx->base +
+		GSI_EE_n_GSI_CH_k_SCRATCH_1_OFFS(chan_hdl,
+			gsi_ctx->per.ee));
+	val->data.word2 = reg;
+
+	reg = gsi_readl(gsi_ctx->base +
+		GSI_EE_n_GSI_CH_k_SCRATCH_2_OFFS(chan_hdl,
+			gsi_ctx->per.ee));
+	val->data.word3 = reg;
+
+	reg = gsi_readl(gsi_ctx->base +
+		GSI_EE_n_GSI_CH_k_SCRATCH_3_OFFS(chan_hdl,
+			gsi_ctx->per.ee));
+	val->data.word4 = reg;
+}
 
 static void __gsi_write_channel_scratch(unsigned long chan_hdl,
 		union __packed gsi_channel_scratch val)
@@ -1936,6 +1970,40 @@ int gsi_write_channel_scratch(unsigned long chan_hdl,
 	return GSI_STATUS_SUCCESS;
 }
 EXPORT_SYMBOL(gsi_write_channel_scratch);
+
+int gsi_read_channel_scratch(unsigned long chan_hdl,
+	union __packed gsi_channel_scratch * ch_scratch)
+{
+	struct gsi_chan_ctx *ctx;
+
+	if (!gsi_ctx) {
+		pr_err("%s:%d gsi context not allocated\n", __func__, __LINE__);
+		return -GSI_STATUS_NODEV;
+	}
+
+	if (chan_hdl >= gsi_ctx->max_ch) {
+		GSIERR("bad params chan_hdl=%lu\n", chan_hdl);
+		return -GSI_STATUS_INVALID_PARAMS;
+	}
+
+	if (gsi_ctx->chan[chan_hdl].state != GSI_CHAN_STATE_ALLOCATED &&
+		gsi_ctx->chan[chan_hdl].state != GSI_CHAN_STATE_STARTED &&
+		gsi_ctx->chan[chan_hdl].state != GSI_CHAN_STATE_STOPPED) {
+		GSIERR("bad state %d\n",
+				gsi_ctx->chan[chan_hdl].state);
+		return -GSI_STATUS_UNSUPPORTED_OP;
+	}
+
+	ctx = &gsi_ctx->chan[chan_hdl];
+
+	mutex_lock(&ctx->mlock);
+	__gsi_read_channel_scratch(chan_hdl, ch_scratch);
+	ctx->restore_scratch = *ch_scratch;
+	mutex_unlock(&ctx->mlock);
+
+	return GSI_STATUS_SUCCESS;
+}
+EXPORT_SYMBOL(gsi_read_channel_scratch);
 
 int gsi_query_channel_db_addr(unsigned long chan_hdl,
 		uint32_t *db_addr_wp_lsb, uint32_t *db_addr_wp_msb)
@@ -2237,6 +2305,10 @@ revrfy_chnlstate:
 		BUG();
 	}
 
+	/* Hardware issue fixed from GSI 2.0 and no need for the WA */
+	if (gsi_ctx->per.ver >= GSI_VER_2_0)
+		reset_done = true;
+
 	/* workaround: reset GSI producers again */
 	if (ctx->props.dir == GSI_CHAN_DIR_FROM_GSI && !reset_done) {
 		usleep_range(GSI_RESET_WA_MIN_SLEEP, GSI_RESET_WA_MAX_SLEEP);
@@ -2310,6 +2382,11 @@ int gsi_dealloc_channel(unsigned long chan_hdl)
 	if (ctx->evtr)
 		atomic_dec(&ctx->evtr->chan_ref_cnt);
 	atomic_dec(&gsi_ctx->num_chan);
+
+	if (gsi_ctx->shared_ch_info.ch_id == chan_hdl) {
+		gsi_ctx->shared_ch_info.ch_id = gsi_ctx->max_ch;
+		gsi_ctx->shared_ch_info.evchid = gsi_ctx->max_ev;
+	}
 
 	return GSI_STATUS_SUCCESS;
 }
@@ -2615,7 +2692,7 @@ int gsi_start_xfer(unsigned long chan_hdl)
 		return -GSI_STATUS_UNSUPPORTED_OP;
 	}
 
-	if (ctx->state != GSI_CHAN_STATE_STARTED) {
+	if (ctx->state == GSI_CHAN_STATE_NOT_ALLOCATED) {
 		GSIERR("bad state %d\n", ctx->state);
 		return -GSI_STATUS_UNSUPPORTED_OP;
 	}
@@ -2687,6 +2764,7 @@ EXPORT_SYMBOL(gsi_poll_channel);
 int gsi_config_channel_mode(unsigned long chan_hdl, enum gsi_chan_mode mode)
 {
 	struct gsi_chan_ctx *ctx;
+	struct gsi_chan_ctx *shared_ch_ctx;
 	enum gsi_chan_mode curr;
 	unsigned long flags;
 
@@ -2729,13 +2807,39 @@ int gsi_config_channel_mode(unsigned long chan_hdl, enum gsi_chan_mode mode)
 			mode == GSI_CHAN_MODE_POLL) {
 		__gsi_config_ieob_irq(gsi_ctx->per.ee, 1 << ctx->evtr->id, 0);
 		atomic_set(&ctx->poll_mode, mode);
+		if ((ctx->props.common_evt_ring) &&
+			(gsi_ctx->shared_ch_info.ch_id == chan_hdl)) {
+			atomic_set(&ctx->evtr->chan->poll_mode, mode);
+		} else if ((ctx->props.common_evt_ring) &&
+				gsi_ctx->shared_ch_info.evchid ==
+					ctx->evtr->id) {
+			shared_ch_ctx =
+				&gsi_ctx->chan[gsi_ctx->shared_ch_info.ch_id];
+			if (shared_ch_ctx != NULL)
+				atomic_set(&shared_ch_ctx->poll_mode, mode);
+		}
+		GSIDBG("set gsi_ctx evtr_id %d to %d mode\n",
+			ctx->evtr->id, mode);
 		ctx->stats.callback_to_poll++;
 	}
 
 	if (curr == GSI_CHAN_MODE_POLL &&
 			mode == GSI_CHAN_MODE_CALLBACK) {
 		atomic_set(&ctx->poll_mode, mode);
+		if ((ctx->props.common_evt_ring) &&
+			(gsi_ctx->shared_ch_info.ch_id == chan_hdl)) {
+			atomic_set(&ctx->evtr->chan->poll_mode, mode);
+		} else if ((ctx->props.common_evt_ring) &&
+				gsi_ctx->shared_ch_info.evchid ==
+				ctx->evtr->id) {
+			shared_ch_ctx =
+				&gsi_ctx->chan[gsi_ctx->shared_ch_info.ch_id];
+			if (shared_ch_ctx != NULL)
+				atomic_set(&shared_ch_ctx->poll_mode, mode);
+		}
 		__gsi_config_ieob_irq(gsi_ctx->per.ee, 1 << ctx->evtr->id, ~0);
+		GSIDBG("set gsi_ctx evtr_id %d to %d mode\n",
+			ctx->evtr->id, mode);
 		ctx->stats.poll_to_callback++;
 	}
 	spin_unlock_irqrestore(&gsi_ctx->slock, flags);

@@ -93,6 +93,48 @@ static inline bool mdss_xlog_is_enabled(u32 flag)
 		(flag == MDSS_XLOG_ALL && mdss_dbg_xlog.xlog_enable);
 }
 
+static void __halt_vbif_xin(void)
+{
+	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
+
+	pr_err("Halting VBIF-XIN\n");
+	MDSS_VBIF_WRITE(mdata, MMSS_VBIF_XIN_HALT_CTRL0, 0xFFFFFFFF, false);
+}
+
+static void __halt_vbif_axi(void)
+{
+	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
+
+	pr_err("Halting VBIF-AXI\n");
+	MDSS_VBIF_WRITE(mdata, MMSS_VBIF_AXI_HALT_CTRL0, 0xFFFFFFFF, false);
+}
+
+static void __dump_vbif_state(void)
+{
+	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
+	unsigned int reg_vbif_src_err, reg_vbif_err_info,
+		reg_vbif_xin_halt_ctrl0, reg_vbif_xin_halt_ctrl1,
+		reg_vbif_axi_halt_ctrl0, reg_vbif_axi_halt_ctrl1;
+
+	reg_vbif_src_err = MDSS_VBIF_READ(mdata,
+					MMSS_VBIF_SRC_ERR, false);
+	reg_vbif_err_info = MDSS_VBIF_READ(mdata,
+					MMSS_VBIF_ERR_INFO, false);
+	reg_vbif_xin_halt_ctrl0 = MDSS_VBIF_READ(mdata,
+					MMSS_VBIF_XIN_HALT_CTRL0, false);
+	reg_vbif_xin_halt_ctrl1 = MDSS_VBIF_READ(mdata,
+					MMSS_VBIF_XIN_HALT_CTRL1, false);
+	reg_vbif_axi_halt_ctrl0 = MDSS_VBIF_READ(mdata,
+					MMSS_VBIF_AXI_HALT_CTRL0, false);
+	reg_vbif_axi_halt_ctrl1 = MDSS_VBIF_READ(mdata,
+					MMSS_VBIF_AXI_HALT_CTRL1, false);
+	pr_err("VBIF SRC_ERR=%x, ERR_INFO=%x\n",
+				reg_vbif_src_err, reg_vbif_err_info);
+	pr_err("VBIF XIN_HALT_CTRL0=%x, XIN_HALT_CTRL1=%x, AXI_HALT_CTRL0=%x, AXI_HALT_CTRL1=%x\n"
+			, reg_vbif_xin_halt_ctrl0, reg_vbif_xin_halt_ctrl1,
+			reg_vbif_axi_halt_ctrl0, reg_vbif_axi_halt_ctrl1);
+}
+
 void mdss_xlog(const char *name, int line, int flag, ...)
 {
 	unsigned long flags;
@@ -444,8 +486,8 @@ void mdss_dump_reg(const char *dump_name, u32 reg_dump_flag, char *addr,
 		}
 	}
 
-	if (!from_isr)
-		mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON);
+	if (!from_isr && mdata->debug_inf.debug_enable_clock)
+		mdata->debug_inf.debug_enable_clock(MDP_BLOCK_POWER_ON);
 
 	for (i = 0; i < len; i++) {
 		u32 x0, x4, x8, xc;
@@ -469,8 +511,8 @@ void mdss_dump_reg(const char *dump_name, u32 reg_dump_flag, char *addr,
 		addr += 16;
 	}
 
-	if (!from_isr)
-		mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF);
+	if (!from_isr && mdata->debug_inf.debug_enable_clock)
+		mdata->debug_inf.debug_enable_clock(MDP_BLOCK_POWER_OFF);
 }
 
 static void mdss_dump_reg_by_ranges(struct mdss_debug_base *dbg,
@@ -604,8 +646,17 @@ static void mdss_xlog_dump_array(struct mdss_debug_base *blk_arr[],
 		mdss_dump_dsi_debug_bus(mdss_dbg_xlog.enable_dsi_dbgbus_dump,
 			&mdss_dbg_xlog.dsi_dbgbus_dump);
 
-	if (dead && mdss_dbg_xlog.panic_on_err)
+	if (dead && mdss_dbg_xlog.panic_on_err) {
+		mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON);
+		__dump_vbif_state();
+		__halt_vbif_xin();
+		usleep_range(10000, 10010);
+		__halt_vbif_axi();
+		usleep_range(10000, 10010);
+		__dump_vbif_state();
+		mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF);
 		panic(name);
+	}
 }
 
 static void xlog_debug_work(struct work_struct *work)

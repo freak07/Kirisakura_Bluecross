@@ -2014,7 +2014,7 @@ static int sec_ts_probe(struct i2c_client *client,
 	complete_all(&ts->bus_resumed);
 
 #ifdef SEC_TS_FW_UPDATE_ON_PROBE
-	INIT_WORK(&ts->work_fw_update, sec_ts_fw_update_work);
+	INIT_DELAYED_WORK(&ts->work_fw_update, sec_ts_fw_update_work);
 #else
 	input_info(true, &ts->client->dev, "%s: fw update on probe disabled!\n",
 		   __func__);
@@ -2185,19 +2185,15 @@ static int sec_ts_probe(struct i2c_client *client,
 
 	device_init_wakeup(&client->dev, true);
 
-	if (ts->is_fw_corrupted == false)
+	if (ts->is_fw_corrupted == false) {
 		sec_ts_device_init(ts);
-
-#ifdef SEC_TS_FW_UPDATE_ON_PROBE
-	schedule_work(&ts->work_fw_update);
-
-	/* Do not finish probe without checking and flashing the firmware */
-	flush_work(&ts->work_fw_update);
-#endif
-
-	if (ts->is_fw_corrupted == false)
 		schedule_delayed_work(&ts->work_read_info,
 				      msecs_to_jiffies(5000));
+	}
+
+#ifdef SEC_TS_FW_UPDATE_ON_PROBE
+	schedule_delayed_work(&ts->work_fw_update, msecs_to_jiffies(10000));
+#endif
 
 #if defined(CONFIG_TOUCHSCREEN_DUMP_MODE)
 	dump_callbacks.inform_dump = dump_tsp_log;
@@ -2503,7 +2499,7 @@ static void sec_ts_read_info_work(struct work_struct *work)
 static void sec_ts_fw_update_work(struct work_struct *work)
 {
 	struct sec_ts_data *ts = container_of(work, struct sec_ts_data,
-					      work_fw_update);
+					      work_fw_update.work);
 	int ret;
 
 	input_info(true, &ts->client->dev,
@@ -2675,7 +2671,8 @@ static int sec_ts_remove(struct i2c_client *client)
 	destroy_workqueue(ts->event_wq);
 
 #ifdef SEC_TS_FW_UPDATE_ON_PROBE
-	cancel_work_sync(&ts->work_fw_update);
+	cancel_delayed_work_sync(&ts->work_fw_update);
+	flush_delayed_work(&ts->work_fw_update);
 #endif
 
 	cancel_delayed_work_sync(&ts->work_read_info);

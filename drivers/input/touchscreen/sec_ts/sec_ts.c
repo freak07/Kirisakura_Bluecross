@@ -28,6 +28,7 @@ struct class *sec_class;
 #ifdef USE_POWER_RESET_WORK
 static void sec_ts_reset_work(struct work_struct *work);
 #endif
+static void sec_ts_read_info_work(struct work_struct *work);
 static void sec_ts_fw_update_work(struct work_struct *work);
 static void sec_ts_suspend_work(struct work_struct *work);
 static void sec_ts_resume_work(struct work_struct *work);
@@ -1997,6 +1998,7 @@ static int sec_ts_probe(struct i2c_client *client,
 #ifdef USE_POWER_RESET_WORK
 	INIT_DELAYED_WORK(&ts->reset_work, sec_ts_reset_work);
 #endif
+	INIT_DELAYED_WORK(&ts->work_read_info, sec_ts_read_info_work);
 	INIT_WORK(&ts->suspend_work, sec_ts_suspend_work);
 	INIT_WORK(&ts->resume_work, sec_ts_resume_work);
 	ts->event_wq = alloc_workqueue("sec_ts-event-queue", WQ_UNBOUND |
@@ -2012,21 +2014,10 @@ static int sec_ts_probe(struct i2c_client *client,
 	complete_all(&ts->bus_resumed);
 
 #ifdef SEC_TS_FW_UPDATE_ON_PROBE
-	INIT_WORK(&ts->fw_update_work, sec_ts_fw_update_work);
+	INIT_WORK(&ts->work_fw_update, sec_ts_fw_update_work);
 #else
 	input_info(true, &ts->client->dev, "%s: fw update on probe disabled!\n",
 		   __func__);
-	ts->fw_update_wq = alloc_workqueue("sec_ts-fw-update-queue",
-					    WQ_UNBOUND | WQ_HIGHPRI |
-					    WQ_CPU_INTENSIVE, 1);
-	if (!ts->fw_update_wq) {
-		input_err(true, &ts->client->dev,
-			  "%s: Can't alloc fw update work thread\n",
-			  __func__);
-		ret = -ENOMEM;
-		goto error_alloc_fw_update_wq;
-	}
-	INIT_DELAYED_WORK(&ts->fw_update_work, sec_ts_fw_update_work);
 #endif
 
 	ts->is_fw_corrupted = false;
@@ -2198,14 +2189,15 @@ static int sec_ts_probe(struct i2c_client *client,
 		sec_ts_device_init(ts);
 
 #ifdef SEC_TS_FW_UPDATE_ON_PROBE
-	schedule_work(&ts->fw_update_work);
+	schedule_work(&ts->work_fw_update);
 
 	/* Do not finish probe without checking and flashing the firmware */
-	flush_work(&ts->fw_update_work);
-#else
-	queue_delayed_work(ts->fw_update_wq, &ts->fw_update_work,
-		    msecs_to_jiffies(SEC_TS_FW_UPDATE_DELAY_MS_AFTER_PROBE));
+	flush_work(&ts->work_fw_update);
 #endif
+
+	if (ts->is_fw_corrupted == false)
+		schedule_delayed_work(&ts->work_read_info,
+				      msecs_to_jiffies(5000));
 
 #if defined(CONFIG_TOUCHSCREEN_DUMP_MODE)
 	dump_callbacks.inform_dump = dump_tsp_log;
@@ -2258,12 +2250,6 @@ err_allocate_input_dev:
 #ifdef CONFIG_TOUCHSCREEN_TBN
 	tbn_cleanup(ts->tbn);
 err_init_tbn:
-#endif
-
-#ifndef SEC_TS_FW_UPDATE_ON_PROBE
-	if (ts->fw_update_wq)
-		destroy_workqueue(ts->fw_update_wq);
-error_alloc_fw_update_wq:
 #endif
 
 	if (ts->event_wq)
@@ -2450,8 +2436,10 @@ static void sec_ts_reset_work(struct work_struct *work)
 }
 #endif
 
-void sec_ts_read_init_info(struct sec_ts_data *ts)
+static void sec_ts_read_info_work(struct work_struct *work)
 {
+	struct sec_ts_data *ts = container_of(work, struct sec_ts_data,
+							work_read_info.work);
 #ifndef CONFIG_SEC_FACTORY
 	struct sec_ts_test_mode mode;
 	char para = TO_TOUCH_MODE;
@@ -2463,22 +2451,14 @@ void sec_ts_read_init_info(struct sec_ts_data *ts)
 
 	ts->nv = get_tsp_nvm_data(ts, SEC_TS_NVM_OFFSET_FAC_RESULT);
 	ts->cal_count = get_tsp_nvm_data(ts, SEC_TS_NVM_OFFSET_CAL_COUNT);
-	ts->pressure_cal_base = get_tsp_nvm_data(ts,
-				SEC_TS_NVM_OFFSET_PRESSURE_BASE_CAL_COUNT);
-	ts->pressure_cal_delta = get_tsp_nvm_data(ts,
-				SEC_TS_NVM_OFFSET_PRESSURE_DELTA_CAL_COUNT);
+	ts->pressure_cal_base = get_tsp_nvm_data(ts, SEC_TS_NVM_OFFSET_PRESSURE_BASE_CAL_COUNT);
+	ts->pressure_cal_delta = get_tsp_nvm_data(ts, SEC_TS_NVM_OFFSET_PRESSURE_DELTA_CAL_COUNT);
 
-	input_info(true, &ts->client->dev,
-		    "%s: fac_nv:%02X, cal_count:%02X\n",
-		    __func__, ts->nv, ts->cal_count);
+	input_info(true, &ts->client->dev, "%s: fac_nv:%02X, cal_count:%02X\n", __func__, ts->nv, ts->cal_count);
 
 #ifdef PAT_CONTROL
-	ts->tune_fix_ver = (get_tsp_nvm_data(ts,
-				SEC_TS_NVM_OFFSET_TUNE_VERSION) << 8) |
-			    get_tsp_nvm_data(ts,
-				SEC_TS_NVM_OFFSET_TUNE_VERSION + 1);
-	input_info(true, &ts->client->dev,
-	    "%s: tune_fix_ver [%04X]\n", __func__, ts->tune_fix_ver);
+	ts->tune_fix_ver = (get_tsp_nvm_data(ts, SEC_TS_NVM_OFFSET_TUNE_VERSION) << 8) | get_tsp_nvm_data(ts, SEC_TS_NVM_OFFSET_TUNE_VERSION+1);
+	input_info(true, &ts->client->dev, "%s: tune_fix_ver [%04X]\n", __func__, ts->tune_fix_ver);
 #endif
 
 #ifdef USE_PRESSURE_SENSOR
@@ -2489,9 +2469,8 @@ void sec_ts_read_init_info(struct sec_ts_data *ts)
 	ts->pressure_left = ((data[16] << 8) | data[17]);
 	ts->pressure_center = ((data[8] << 8) | data[9]);
 	ts->pressure_right = ((data[0] << 8) | data[1]);
-	input_info(true, &ts->client->dev,
-		"%s: left: %d, center: %d, right: %d\n", __func__,
-		ts->pressure_left, ts->pressure_center, ts->pressure_right);
+	input_info(true, &ts->client->dev, "%s: left: %d, center: %d, right: %d\n",
+		__func__, ts->pressure_left, ts->pressure_center, ts->pressure_right);
 #endif
 
 #ifndef CONFIG_SEC_FACTORY
@@ -2506,8 +2485,7 @@ void sec_ts_read_init_info(struct sec_ts_data *ts)
 
 	ret = ts->sec_ts_i2c_write(ts, SEC_TS_CMD_SET_POWER_MODE, &para, 1);
 	if (ret < 0)
-		input_err(true, &ts->client->dev, "%s: Failed to set\n",
-				__func__);
+		 input_err(true, &ts->client->dev, "%s: Failed to set\n", __func__);
 
 	sec_ts_delay(350);
 
@@ -2524,16 +2502,8 @@ void sec_ts_read_init_info(struct sec_ts_data *ts)
 
 static void sec_ts_fw_update_work(struct work_struct *work)
 {
-#ifdef SEC_TS_FW_UPDATE_ON_PROBE
 	struct sec_ts_data *ts = container_of(work, struct sec_ts_data,
-					      fw_update_work);
-#else
-	struct delayed_work *fw_update_work = container_of(work,
-					struct delayed_work, work);
-	struct sec_ts_data *ts = container_of(fw_update_work,
-					struct sec_ts_data, fw_update_work);
-#endif
-
+					      work_fw_update);
 	int ret;
 
 	input_info(true, &ts->client->dev,
@@ -2552,14 +2522,13 @@ static void sec_ts_fw_update_work(struct work_struct *work)
 		if (ret == SEC_TS_ERR_NA) {
 			ts->is_fw_corrupted = false;
 			sec_ts_device_init(ts);
+			sec_ts_read_info_work(&ts->work_read_info.work);
 		} else
 			input_info(true, &ts->client->dev,
 				"%s: fail to sec_ts_fw_init 0x%x\n",
 				__func__, ret);
 	}
 
-	if (ts->is_fw_corrupted == false)
-		sec_ts_read_init_info(ts);
 	sec_ts_set_bus_ref(ts, SEC_TS_BUS_REF_FW_UPDATE, false);
 }
 
@@ -2706,11 +2675,11 @@ static int sec_ts_remove(struct i2c_client *client)
 	destroy_workqueue(ts->event_wq);
 
 #ifdef SEC_TS_FW_UPDATE_ON_PROBE
-	cancel_work_sync(&ts->fw_update_work);
-#else
-	cancel_delayed_work_sync(&ts->fw_update_work);
-	destroy_workqueue(ts->fw_update_wq);
+	cancel_work_sync(&ts->work_fw_update);
 #endif
+
+	cancel_delayed_work_sync(&ts->work_read_info);
+	flush_delayed_work(&ts->work_read_info);
 
 	disable_irq_nosync(ts->client->irq);
 	free_irq(ts->client->irq, ts);

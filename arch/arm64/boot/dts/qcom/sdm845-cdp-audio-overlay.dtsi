@@ -13,7 +13,9 @@
 
 #include "sdm845-audio-overlay.dtsi"
 
-&snd_934x {
-	qcom,us-euro-gpios = <&tavil_us_euro_sw>;
+&soc {
+	sound-tavil {
+		qcom,us-euro-gpios = <&tavil_us_euro_sw>;
+	};
 };
 

@@ -2060,7 +2060,6 @@ static void ffs_data_reset(struct ffs_data *ffs)
 	ffs->setup_state = FFS_NO_SETUP;
 	ffs->flags = 0;
 
-
 	ffs_log("exit: state %d setup_state %d flag %lu", ffs->state,
 		ffs->setup_state, ffs->flags);
 

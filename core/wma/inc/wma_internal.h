@@ -799,6 +799,14 @@ void wma_set_resume_dtim(tp_wma_handle wma);
 void wma_set_bss_rate_flags(struct wma_txrx_node *iface,
 				   tpAddBssParams add_bss);
 
+/**
+ * wma_get_vht_rate_flags() - Return the VHT rate flags corresponding to the BW
+ * @ch_width: BW for which rate flags is required
+ *
+ * Return: Rate flags corresponding to ch_width
+ */
+tTxrateinfoflags wma_get_vht_rate_flags(enum phy_ch_width ch_width);
+
 int32_t wmi_unified_send_txbf(tp_wma_handle wma, tpAddStaParams params);
 
 /**

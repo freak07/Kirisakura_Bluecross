@@ -29,10 +29,13 @@
 #include <linux/pmic-voter.h>
 #include <linux/alarmtimer.h>
 #include "p9221_charger.h"
+#include "../../../usb/pd/logbuffer.h"
 
 #define P9221_TX_TIMEOUT_MS		(20 * 1000)
 #define P9221_DCIN_TIMEOUT_MS		(2 * 1000)
 #define P9221_VRECT_TIMEOUT_MS		(2 * 1000)
+#define P9221_ALIGN_TIMEOUT_MS		(2 * 1000)
+#define P9221_ALIGN_DELAY_MS		100
 #define P9221_NOTIFIER_DELAY_MS		80
 #define P9221R5_ILIM_MAX_UA		(1600 * 1000)
 #define P9221R5_OVER_CHECK_NUM		3
@@ -42,12 +45,23 @@
 #define OVC_BACKOFF_LIMIT		900000
 #define OVC_BACKOFF_AMOUNT		100000
 
+#define WLC_ALIGNMENT_MAX		100
+#define WLC_MFG_GOOGLE			0x72
+#define WLC_CURRENT_FILTER_LENGTH	10
+#define WLC_ALIGN_DEFAULT_SCALAR	4
+#define WLC_ALIGN_IRQ_THRESHOLD		10
+#define WLC_ALIGN_DEFAULT_HYSTERESIS	5000
+
 static void p9221_icl_ramp_reset(struct p9221_charger_data *charger);
 static void p9221_icl_ramp_start(struct p9221_charger_data *charger);
 
 static const u32 p9221_ov_set_lut[] = {
 	17000000, 20000000, 15000000, 13000000,
 	11000000, 11000000, 11000000, 11000000};
+
+static char *align_status_str[] = {
+	"...", "M2C", "OK", "-1"
+};
 
 static size_t p9221_hex_str(u8 *data, size_t len, char *buf, size_t max_buf,
 			    bool msbfirst)
@@ -677,6 +691,7 @@ static void p9221_vote_defaults(struct p9221_charger_data *charger)
 static void p9221_set_offline(struct p9221_charger_data *charger)
 {
 	dev_info(&charger->client->dev, "Set offline\n");
+	logbuffer_log(charger->log, "offline\n");
 
 	charger->online = false;
 
@@ -685,6 +700,16 @@ static void p9221_set_offline(struct p9221_charger_data *charger)
 
 	p9221_abort_transfers(charger);
 	cancel_delayed_work(&charger->dcin_work);
+
+	/* Reset alignment value when charger goes offline */
+	cancel_delayed_work(&charger->align_work);
+	charger->align = POWER_SUPPLY_ALIGN_ERROR;
+	charger->align_count = 0;
+	charger->alignment = -1;
+	charger->alignment_capable = ALIGN_MFG_FAILED;
+	charger->mfg = 0;
+	schedule_work(&charger->uevent_work);
+
 	p9221_icl_ramp_reset(charger);
 	del_timer(&charger->vrect_timer);
 
@@ -708,9 +733,30 @@ static void p9221_vrect_timer_handler(unsigned long data)
 {
 	struct p9221_charger_data *charger = (struct p9221_charger_data *)data;
 
+	if (charger->align == POWER_SUPPLY_ALIGN_CHECKING) {
+		schedule_work(&charger->uevent_work);
+		charger->align = POWER_SUPPLY_ALIGN_MOVE;
+		logbuffer_log(charger->log, "align: state: %s",
+			      align_status_str[charger->align]);
+	}
 	dev_info(&charger->client->dev,
 		 "timeout waiting for VRECT, online=%d\n", charger->online);
+	logbuffer_log(charger->log,
+		"vrect: timeout online=%d", charger->online);
+
+	mod_timer(&charger->align_timer,
+		jiffies + msecs_to_jiffies(P9221_ALIGN_TIMEOUT_MS));
+
 	pm_relax(charger->dev);
+}
+
+static void p9221_align_timer_handler(unsigned long data)
+{
+	struct p9221_charger_data *charger = (struct p9221_charger_data *)data;
+
+	schedule_work(&charger->uevent_work);
+	charger->align = POWER_SUPPLY_ALIGN_ERROR;
+	logbuffer_log(charger->log, "align: timeout no IRQ");
 }
 
 static void p9221_dcin_work(struct work_struct *work)
@@ -720,6 +766,8 @@ static void p9221_dcin_work(struct work_struct *work)
 
 	dev_info(&charger->client->dev,
 		 "timeout waiting for dc-in, online=%d\n", charger->online);
+	logbuffer_log(charger->log,
+		      "dc_in: timeout online=%d", charger->online);
 
 	if (charger->online)
 		p9221_set_offline(charger);
@@ -727,6 +775,150 @@ static void p9221_dcin_work(struct work_struct *work)
 	power_supply_changed(charger->wc_psy);
 
 	pm_relax(charger->dev);
+}
+
+static void p9221_init_align(struct p9221_charger_data *charger)
+{
+	/* Reset values used for alignment */
+	charger->alignment_last = -1;
+	charger->current_filtered = 0;
+	charger->current_sample_cnt = 0;
+	charger->mfg_check_count = 0;
+	schedule_delayed_work(&charger->align_work,
+			      msecs_to_jiffies(P9221_ALIGN_DELAY_MS));
+}
+
+static void p9221_align_work(struct work_struct *work)
+{
+	int res, align_buckets, i, wlc_freq_threshold, wlc_adj_freq;
+	u16 current_now, current_filter_sample;
+	u32 wlc_freq, current_scaling = 0;
+	struct p9221_charger_data *charger = container_of(work,
+			struct p9221_charger_data, align_work.work);
+
+	if (charger->pdata->alignment_freq == NULL)
+		return;
+
+	charger->alignment = -1;
+
+	if (!charger->online)
+		return;
+
+	/*
+	 *  NOTE: mfg may be zero due to race condition during bringup. If the
+	 *  mfg check continues to fail then mfg is not correct and we do not
+	 *  reschedule align_work. Always reschedule if alignment_capable is 1.
+	 *  Check 10 times if alignment_capble is still 0.
+	 */
+	if ((charger->mfg_check_count < 10) ||
+	    (charger->alignment_capable == ALIGN_MFG_PASSED))
+		schedule_delayed_work(&charger->align_work,
+				      msecs_to_jiffies(P9221_ALIGN_DELAY_MS));
+
+	if (charger->alignment_capable == ALIGN_MFG_CHECKING) {
+		charger->mfg_check_count += 1;
+
+		res = p9221_reg_read_16(charger,
+					P9221R5_EPP_TX_MFG_CODE_REG,
+					&charger->mfg);
+		if (res < 0) {
+			dev_err(&charger->client->dev,
+				"cannot read MFG_CODE (%d)\n", res);
+			return;
+		}
+
+		/* No mfg update. Will check again on next schedule */
+		if (charger->mfg == 0)
+			return;
+
+		if ((charger->mfg != WLC_MFG_GOOGLE) ||
+		    !p9221_is_epp(charger)) {
+			logbuffer_log(charger->log,
+				      "align: not align capable mfg: 0x%x",
+				      charger->mfg);
+			cancel_delayed_work(&charger->align_work);
+			charger->alignment_capable = ALIGN_MFG_FAILED;
+			return;
+		}
+		charger->alignment_capable = ALIGN_MFG_PASSED;
+	}
+
+	if (charger->pdata->alignment_scalar == 0)
+		goto no_scaling;
+
+	res = p9221_reg_read_16(charger, P9221R5_IOUT_REG, &current_now);
+
+	if (res != 0) {
+		logbuffer_log(charger->log, "align: failed to read IOUT");
+		current_now = 0;
+	}
+
+	current_filter_sample =
+			charger->current_filtered / WLC_CURRENT_FILTER_LENGTH;
+
+	if (charger->current_sample_cnt < WLC_CURRENT_FILTER_LENGTH)
+		charger->current_sample_cnt++;
+	else
+		charger->current_filtered -= current_filter_sample;
+
+	charger->current_filtered += (current_now / WLC_CURRENT_FILTER_LENGTH);
+	dev_dbg(&charger->client->dev, "current = %umA, avg_current = %umA\n",
+		current_now, charger->current_filtered);
+
+	current_scaling = charger->pdata->alignment_scalar *
+			  charger->current_filtered;
+
+no_scaling:
+	res = p9221_reg_read_cooked(charger, P9221R5_OP_FREQ_REG, &wlc_freq);
+
+	if (res != 0) {
+		logbuffer_log(charger->log, "align: failed to read op_freq");
+		return;
+	}
+
+	align_buckets = charger->pdata->nb_alignment_freq - 1;
+
+	charger->alignment = -1;
+	wlc_adj_freq = wlc_freq + current_scaling;
+
+	if (wlc_adj_freq < charger->pdata->alignment_freq[0]) {
+		logbuffer_log(charger->log, "align: freq below range");
+		return;
+	}
+
+	for (i = 0; i < align_buckets; i += 1) {
+		if ((wlc_adj_freq > charger->pdata->alignment_freq[i]) &&
+		    (wlc_adj_freq <= charger->pdata->alignment_freq[i + 1])) {
+			charger->alignment = (WLC_ALIGNMENT_MAX * i) /
+					     (align_buckets - 1);
+			break;
+		}
+	}
+
+	if (i == align_buckets) {
+		logbuffer_log(charger->log, "align: freq above range");
+		return;
+	}
+
+	if (charger->alignment == charger->alignment_last)
+		return;
+
+	/*
+	 *  Frequency needs to be higher than frequency + hysteresis before
+	 *  increasing alignment score.
+	 */
+	wlc_freq_threshold = charger->pdata->alignment_freq[i] +
+			     charger->pdata->alignment_hysteresis;
+
+	if ((charger->alignment < charger->alignment_last) ||
+	    (wlc_adj_freq >= wlc_freq_threshold)) {
+		schedule_work(&charger->uevent_work);
+		logbuffer_log(charger->log,
+			      "align: alignment=%i. op_freq=%u. current_avg=%u",
+			     charger->alignment, wlc_freq,
+			     charger->current_filtered);
+		charger->alignment_last = charger->alignment;
+	}
 }
 
 static const char *p9221_get_tx_id_str(struct p9221_charger_data *charger)
@@ -833,7 +1025,6 @@ static int p9221_set_property(struct power_supply *psy,
 
 		if (charger->enabled == val->intval)
 			break;
-
 		/*
 		 * Asserting the enable line will automatically take bring
 		 * us online if we are in field.  De-asserting the enable
@@ -852,18 +1043,20 @@ static int p9221_set_property(struct power_supply *psy,
 
 		changed = true;
 		break;
-
 	case POWER_SUPPLY_PROP_CAPACITY:
-		if (!charger->online || charger->last_capacity == val->intval)
+		if (charger->last_capacity == val->intval)
 			break;
 
 		charger->last_capacity = val->intval;
+
+		if (!charger->online)
+			break;
+
 		ret = p9221_send_csp(charger, charger->last_capacity);
 		if (ret)
 			dev_err(&charger->client->dev,
 				"Could send csp: %d\n", ret);
 		changed = true;
-
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
 		if (val->intval < 0) {
@@ -1123,6 +1316,13 @@ static void p9221_set_online(struct p9221_charger_data *charger)
 
 	/* NOTE: depends on _is_epp() which is not valid until DC_IN */
 	p9221_write_fod(charger);
+
+	charger->alignment_capable = ALIGN_MFG_CHECKING;
+	charger->align = POWER_SUPPLY_ALIGN_CENTERED;
+	charger->alignment = -1;
+	logbuffer_log(charger->log, "align: state: %s",
+		      align_status_str[charger->align]);
+	schedule_work(&charger->uevent_work);
 }
 
 /* 2 * P9221_NOTIFIER_DELAY_MS from VRECTON */
@@ -1145,6 +1345,17 @@ static void p9221_notifier_check_dc(struct p9221_charger_data *charger)
 	}
 
 	dev_info(&charger->client->dev, "dc status is %d\n", prop.intval);
+
+	if (charger->log) {
+		u32 vout_uv;
+
+		ret = p9221_reg_read_cooked(charger, P9221R5_VOUT_REG,
+					    &vout_uv);
+		logbuffer_log(charger->log,
+			      "check_dc: online=%d present=%d VOUT=%uuV (%d)",
+			      charger->online, prop.intval != 0,
+			      (ret == 0) ? vout_uv : 0, ret);
+	}
 
 	/*
 	 * We now have confirmation from DC_IN, kill the timer, charger->online
@@ -1212,9 +1423,22 @@ static void p9221_notifier_work(struct work_struct *work)
 	struct p9221_charger_data *charger = container_of(work,
 			struct p9221_charger_data, notifier_work.work);
 	bool relax = true;
+	int ret;
 
 	dev_info(&charger->client->dev, "Notifier work: on:%d dc:%d det:%d\n",
 		 charger->online, charger->check_dc, charger->check_det);
+
+	if (charger->log) {
+		u32 vrect_uv;
+
+		ret = p9221_reg_read_cooked(charger, P9221R5_VRECT_REG,
+					    &vrect_uv);
+		logbuffer_log(charger->log,
+			      "notifier: on:%d dc:%d det:%d VRECT=%uuV (%d)",
+			      charger->online,
+			      charger->check_dc, charger->check_det,
+			      (ret == 0) ? vrect_uv : 0, ret);
+	}
 
 	if (charger->check_det)
 		relax = p9221_notifier_check_det(charger);
@@ -1741,6 +1965,26 @@ static ssize_t p9221_store_txlen(struct device *dev,
 
 static DEVICE_ATTR(txlen, 0200, NULL, p9221_store_txlen);
 
+static ssize_t p9221_show_alignment(struct device *dev,
+				    struct device_attribute *attr,
+				    char *buf)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct p9221_charger_data *charger = i2c_get_clientdata(client);
+
+	if (charger->alignment == -1)
+		p9221_init_align(charger);
+
+	if ((charger->align != POWER_SUPPLY_ALIGN_CENTERED) ||
+	    (charger->alignment == -1))
+		return scnprintf(buf, PAGE_SIZE, "%s\n",
+				 align_status_str[charger->align]);
+	else
+		return scnprintf(buf, PAGE_SIZE, "%d\n", charger->alignment);
+}
+
+static DEVICE_ATTR(alignment, 0444, p9221_show_alignment, NULL);
+
 static struct attribute *p9221_attributes[] = {
 	&dev_attr_version.attr,
 	&dev_attr_status.attr,
@@ -1755,6 +1999,7 @@ static struct attribute *p9221_attributes[] = {
 	&dev_attr_rxdone.attr,
 	&dev_attr_icl_ramp_ua.attr,
 	&dev_attr_icl_ramp_delay_ms.attr,
+	&dev_attr_alignment.attr,
 	NULL
 };
 
@@ -2027,6 +2272,9 @@ static irqreturn_t p9221_irq_thread(int irq, void *irq_data)
 	}
 
 	dev_info(&charger->client->dev, "INT: %04x\n", irq_src);
+	logbuffer_log(charger->log, "INT=%04x on:%d",
+		      irq_src, charger->online);
+
 	if (!irq_src)
 		goto out;
 
@@ -2061,9 +2309,27 @@ static irqreturn_t p9221_irq_det_thread(int irq, void *irq_data)
 {
 	struct p9221_charger_data *charger = irq_data;
 
+	logbuffer_log(charger->log, "irq_det: online=%d", charger->online);
+
 	/* If we are already online, just ignore the interrupt. */
 	if (charger->online)
 		return IRQ_HANDLED;
+
+	if (charger->align != POWER_SUPPLY_ALIGN_MOVE) {
+		if (charger->align != POWER_SUPPLY_ALIGN_CHECKING)
+			schedule_work(&charger->uevent_work);
+		charger->align = POWER_SUPPLY_ALIGN_CHECKING;
+		charger->align_count++;
+
+		if (charger->align_count > WLC_ALIGN_IRQ_THRESHOLD) {
+			schedule_work(&charger->uevent_work);
+			charger->align = POWER_SUPPLY_ALIGN_MOVE;
+		}
+		logbuffer_log(charger->log, "align: state: %s",
+			      align_status_str[charger->align]);
+	}
+
+	del_timer(&charger->align_timer);
 
 	/*
 	 * This interrupt will wake the device if it's suspended,
@@ -2076,6 +2342,14 @@ static irqreturn_t p9221_irq_det_thread(int irq, void *irq_data)
 	pm_stay_awake(charger->dev);
 
 	return IRQ_HANDLED;
+}
+
+static void p9221_uevent_work(struct work_struct *work)
+{
+	struct p9221_charger_data *charger = container_of(work,
+			struct p9221_charger_data, uevent_work);
+
+	kobject_uevent(&charger->dev->kobj, KOBJ_CHANGE);
 }
 
 static int p9221_parse_dt(struct device *dev,
@@ -2176,6 +2450,55 @@ static int p9221_parse_dt(struct device *dev,
 		}
 	}
 
+	pdata->nb_alignment_freq =
+			of_property_count_elems_of_size(node,
+							"google,alignment_frequencies",
+							sizeof(u32));
+	dev_info(dev, "dt google,alignment_frequencies size = %d\n",
+		 pdata->nb_alignment_freq);
+
+	if (pdata->nb_alignment_freq > 0) {
+		pdata->alignment_freq =
+				devm_kmalloc_array(dev,
+						   pdata->nb_alignment_freq,
+						   sizeof(u32),
+						   GFP_KERNEL);
+		if (!pdata->alignment_freq) {
+			dev_warn(dev,
+				 "dt google,alignment_frequencies array not created");
+		} else {
+			ret = of_property_read_u32_array(node,
+							 "google,alignment_frequencies",
+							 pdata->alignment_freq,
+							 pdata->nb_alignment_freq);
+			if (ret) {
+				dev_warn(dev,
+					 "failed to read google,alignment_frequencies: %d\n",
+					 ret);
+				devm_kfree(dev, pdata->alignment_freq);
+			}
+		}
+	}
+
+	ret = of_property_read_u32(node, "google,alignment_scalar", &data);
+	if (ret < 0)
+		pdata->alignment_scalar = WLC_ALIGN_DEFAULT_SCALAR;
+	else {
+		pdata->alignment_scalar = data;
+		if (pdata->alignment_scalar != WLC_ALIGN_DEFAULT_SCALAR)
+			dev_info(dev, "google,alignment_scalar updated to: %d\n",
+				 pdata->alignment_scalar);
+	}
+
+	ret = of_property_read_u32(node, "google,alignment_hysteresis", &data);
+	if (ret < 0)
+		pdata->alignment_hysteresis = WLC_ALIGN_DEFAULT_HYSTERESIS;
+	else
+		pdata->alignment_hysteresis = data;
+
+	dev_info(dev, "google,alignment_hysteresis set to: %d\n",
+				 pdata->alignment_hysteresis);
+
 	return 0;
 }
 
@@ -2245,13 +2568,19 @@ static int p9221_charger_probe(struct i2c_client *client,
 	charger->client = client;
 	charger->pdata = pdata;
 	charger->resume_complete = true;
+	charger->align = POWER_SUPPLY_ALIGN_ERROR;
+	charger->align_count = 0;
 	mutex_init(&charger->io_lock);
 	mutex_init(&charger->cmd_lock);
 	setup_timer(&charger->vrect_timer, p9221_vrect_timer_handler,
 		    (unsigned long)charger);
+	setup_timer(&charger->align_timer, p9221_align_timer_handler,
+		    (unsigned long)charger);
 	INIT_DELAYED_WORK(&charger->dcin_work, p9221_dcin_work);
 	INIT_DELAYED_WORK(&charger->tx_work, p9221_tx_work);
 	INIT_DELAYED_WORK(&charger->icl_ramp_work, p9221_icl_ramp_work);
+	INIT_DELAYED_WORK(&charger->align_work, p9221_align_work);
+	INIT_WORK(&charger->uevent_work, p9221_uevent_work);
 	alarm_init(&charger->icl_ramp_alarm, ALARM_BOOTTIME,
 		   p9221_icl_ramp_alarm_cb);
 
@@ -2350,6 +2679,14 @@ static int p9221_charger_probe(struct i2c_client *client,
 		return ret;
 	}
 
+	charger->log = debugfs_logbuffer_register("wireless");
+	if (IS_ERR(charger->log)) {
+		ret = PTR_ERR(charger->log);
+		dev_err(charger->dev,
+			"failed to obtain logbuffer instance, ret=%d\n", ret);
+		charger->log = NULL;
+	}
+
 	dev_info(&client->dev, "P9221 Charger Driver Loaded\n");
 
 	if (chip_id == P9221_CHIP_ID) {
@@ -2368,12 +2705,17 @@ static int p9221_charger_remove(struct i2c_client *client)
 	cancel_delayed_work_sync(&charger->dcin_work);
 	cancel_delayed_work_sync(&charger->tx_work);
 	cancel_delayed_work_sync(&charger->icl_ramp_work);
+	cancel_delayed_work_sync(&charger->align_work);
+	cancel_work_sync(&charger->uevent_work);
 	alarm_try_to_cancel(&charger->icl_ramp_alarm);
 	del_timer_sync(&charger->vrect_timer);
+	del_timer_sync(&charger->align_timer);
 	device_init_wakeup(charger->dev, false);
 	cancel_delayed_work_sync(&charger->notifier_work);
 	power_supply_unreg_notifier(&charger->nb);
 	mutex_destroy(&charger->io_lock);
+	if (charger->log)
+		debugfs_logbuffer_unregister(charger->log);
 	return 0;
 }
 

@@ -5,7 +5,7 @@ KCFLAGS='-fno-tree-vrp'
 POST_DEFCONFIG_CMDS="check_defconfig && update_gcc_config"
 
 function update_gcc_config() {
-  # Disable clang-specific options
+  # Disable clang-specific options in gcc build config
   ${KERNEL_DIR}/scripts/config --file ${OUT_DIR}/.config \
     -d LTO \
     -d LTO_CLANG \
@@ -14,5 +14,5 @@ function update_gcc_config() {
     -d CFI_CLANG \
     -d SHADOW_CALL_STACK
   (cd ${OUT_DIR} && \
-    make O=${OUT_DIR} $archsubarch CROSS_COMPILE=${CROSS_COMPILE} olddefconfig)
+   make ${CC_LD_ARG} O=${OUT_DIR} olddefconfig)
 }

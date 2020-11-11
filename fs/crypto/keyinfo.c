@@ -12,6 +12,7 @@
 #include <linux/hashtable.h>
 #include <linux/scatterlist.h>
 #include <linux/ratelimit.h>
+#include <linux/siphash.h>
 #include <crypto/aes.h>
 #include <crypto/algapi.h>
 #include <crypto/sha.h>
@@ -390,7 +391,7 @@ err_free_mk:
 	return ERR_PTR(err);
 }
 
-static int derive_essiv_salt(const u8 *key, int keysize, u8 *salt)
+static int fscrypt_do_sha256(const u8 *src, int srclen, u8 *dst)
 {
 	struct crypto_shash *tfm = READ_ONCE(essiv_hash_tfm);
 
@@ -417,7 +418,7 @@ static int derive_essiv_salt(const u8 *key, int keysize, u8 *salt)
 		desc->tfm = tfm;
 		desc->flags = 0;
 
-		return crypto_shash_digest(desc, key, keysize, salt);
+		return crypto_shash_digest(desc, src, srclen, dst);
 	}
 }
 
@@ -434,7 +435,7 @@ static int init_essiv_generator(struct fscrypt_info *ci, const u8 *raw_key,
 
 	ci->ci_essiv_tfm = essiv_tfm;
 
-	err = derive_essiv_salt(raw_key, keysize, salt);
+	err = fscrypt_do_sha256(raw_key, keysize, salt);
 	if (err)
 		goto out;
 
@@ -500,6 +501,34 @@ static int setup_crypto_transform(struct fscrypt_info *ci,
 	return 0;
 }
 
+static int init_crypt_info_for_ice(struct fscrypt_info *ci,
+				   const struct inode *inode, const u8 *raw_key)
+{
+	const unsigned int raw_key_size = ci->ci_mode->keysize;
+
+	if (!fscrypt_is_ice_capable(inode->i_sb)) {
+		fscrypt_warn(inode->i_sb, "ICE support not available");
+		return -EINVAL;
+	}
+
+	if (ci->ci_flags & FS_POLICY_FLAG_IV_INO_LBLK_32) {
+		union {
+			siphash_key_t k;
+			u8 bytes[SHA256_DIGEST_SIZE];
+		} ino_hash_key;
+		int err;
+
+		/* hashed_ino = SipHash(key=SHA256(master_key), data=i_ino) */
+		err = fscrypt_do_sha256(raw_key, raw_key_size,
+					ino_hash_key.bytes);
+		if (err)
+			return err;
+		ci->ci_hashed_ino = siphash_1u64(inode->i_ino, &ino_hash_key.k);
+	}
+	memcpy(ci->ci_raw_key, raw_key, raw_key_size);
+	return 0;
+}
+
 static void put_crypt_info(struct fscrypt_info *ci)
 {
 	if (!ci)
@@ -523,7 +552,7 @@ int fscrypt_get_encryption_info(struct inode *inode)
 	u8 *raw_key = NULL;
 	int res;
 
-	if (inode->i_crypt_info)
+	if (fscrypt_has_encryption_key(inode))
 		return 0;
 
 	res = fscrypt_initialize(inode->i_sb->s_cop->flags);
@@ -584,13 +613,10 @@ int fscrypt_get_encryption_info(struct inode *inode)
 		goto out;
 
 	if (is_private_mode(crypt_info->ci_mode)) {
-		if (!fscrypt_is_ice_capable(inode->i_sb)) {
-			fscrypt_warn(inode->i_sb, "ICE support not available");
-			res = -EINVAL;
-			goto out;
-		}
 		/* Let's encrypt/decrypt by ICE */
-		memcpy(crypt_info->ci_raw_key, raw_key, mode->keysize);
+		res = init_crypt_info_for_ice(crypt_info, inode, raw_key);
+		if (res)
+			goto out;
 		goto done;
 	}
 
@@ -599,7 +625,7 @@ int fscrypt_get_encryption_info(struct inode *inode)
 		goto out;
 
 done:
-	if (cmpxchg(&inode->i_crypt_info, NULL, crypt_info) == NULL)
+	if (cmpxchg_release(&inode->i_crypt_info, NULL, crypt_info) == NULL)
 		crypt_info = NULL;
 out:
 	if (res == -ENOKEY)
@@ -610,9 +636,30 @@ out:
 }
 EXPORT_SYMBOL(fscrypt_get_encryption_info);
 
+/**
+ * fscrypt_put_encryption_info - free most of an inode's fscrypt data
+ *
+ * Free the inode's fscrypt_info.  Filesystems must call this when the inode is
+ * being evicted.  An RCU grace period need not have elapsed yet.
+ */
 void fscrypt_put_encryption_info(struct inode *inode)
 {
 	put_crypt_info(inode->i_crypt_info);
 	inode->i_crypt_info = NULL;
 }
 EXPORT_SYMBOL(fscrypt_put_encryption_info);
+
+/**
+ * fscrypt_free_inode - free an inode's fscrypt data requiring RCU delay
+ *
+ * Free the inode's cached decrypted symlink target, if any.  Filesystems must
+ * call this after an RCU grace period, just before they free the inode.
+ */
+void fscrypt_free_inode(struct inode *inode)
+{
+	if (IS_ENCRYPTED(inode) && S_ISLNK(inode->i_mode)) {
+		kfree(inode->i_link);
+		inode->i_link = NULL;
+	}
+}
+EXPORT_SYMBOL(fscrypt_free_inode);

@@ -1502,7 +1502,7 @@ static void touchsim_work(struct work_struct *work)
 	struct fts_ts_info *info  = container_of(touchsim,
 						struct fts_ts_info,
 						touchsim);
-	u64 timestamp_ns = ktime_get_ns();
+	ktime_t timestamp = ktime_get();
 
 	/* prevent CPU from entering deep sleep */
 	pm_qos_update_request(&info->pm_qos_req, 100);
@@ -1519,7 +1519,7 @@ static void touchsim_work(struct work_struct *work)
 
 	input_sync(info->input_dev);
 
-	heatmap_read(&info->v4l2, timestamp_ns);
+	heatmap_read(&info->v4l2, ktime_to_ns(timestamp));
 
 	pm_qos_update_request(&info->pm_qos_req, PM_QOS_DEFAULT_VALUE);
 }
@@ -3253,7 +3253,7 @@ static irqreturn_t fts_interrupt_handler(int irq, void *handle)
 
 	input_sync(info->input_dev);
 
-	heatmap_read(&info->v4l2, info->timestamp);
+	heatmap_read(&info->v4l2, ktime_to_ns(info->timestamp));
 
 	pm_qos_update_request(&info->pm_qos_req, PM_QOS_DEFAULT_VALUE);
 	fts_set_bus_ref(info, FTS_BUS_REF_IRQ, false);
@@ -3461,7 +3461,8 @@ static irqreturn_t fts_isr(int irq, void *handle)
 {
 	struct fts_ts_info *info = handle;
 
-	info->timestamp = ktime_get_ns();
+	info->timestamp = ktime_get();
+	input_set_timestamp(info->input_dev, info->timestamp);
 
 	return IRQ_WAKE_THREAD;
 }

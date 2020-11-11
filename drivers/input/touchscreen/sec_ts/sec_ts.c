@@ -1112,14 +1112,15 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 
 	input_sync(ts->input_dev);
 
-	heatmap_read(&ts->v4l2, ts->timestamp);
+	heatmap_read(&ts->v4l2, ktime_to_ns(ts->timestamp));
 }
 
 static irqreturn_t sec_ts_isr(int irq, void *handle)
 {
 	struct sec_ts_data *ts = (struct sec_ts_data *)handle;
 
-	ts->timestamp = ktime_get_ns();
+	ts->timestamp = ktime_get();
+	input_set_timestamp(ts->input_dev, ts->timestamp);
 
 	return IRQ_WAKE_THREAD;
 }

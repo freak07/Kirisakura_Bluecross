@@ -9,6 +9,8 @@
 #include <linux/sched.h>
 #include "hashtab.h"
 
+static struct kmem_cache *hashtab_node_cachep;
+
 struct hashtab *hashtab_create(u32 (*hash_value)(struct hashtab *h, const void *key),
 			       int (*keycmp)(struct hashtab *h, const void *key1, const void *key2),
 			       u32 size)
@@ -17,15 +19,15 @@ struct hashtab *hashtab_create(u32 (*hash_value)(struct hashtab *h, const void *
 	u32 i;
 
 	p = kzalloc(sizeof(*p), GFP_KERNEL);
-	if (p == NULL)
+	if (!p)
 		return p;
 
 	p->size = size;
 	p->nel = 0;
 	p->hash_value = hash_value;
 	p->keycmp = keycmp;
-	p->htable = kmalloc(sizeof(*(p->htable)) * size, GFP_KERNEL);
-	if (p->htable == NULL) {
+	p->htable = kmalloc_array(size, sizeof(*p->htable), GFP_KERNEL);
+	if (!p->htable) {
 		kfree(p);
 		return NULL;
 	}
@@ -57,8 +59,8 @@ int hashtab_insert(struct hashtab *h, void *key, void *datum)
 	if (cur && (h->keycmp(h, key, cur->key) == 0))
 		return -EEXIST;
 
-	newnode = kzalloc(sizeof(*newnode), GFP_KERNEL);
-	if (newnode == NULL)
+	newnode = kmem_cache_zalloc(hashtab_node_cachep, GFP_KERNEL);
+	if (!newnode)
 		return -ENOMEM;
 	newnode->key = key;
 	newnode->datum = datum;
@@ -87,7 +89,7 @@ void *hashtab_search(struct hashtab *h, const void *key)
 	while (cur && h->keycmp(h, key, cur->key) > 0)
 		cur = cur->next;
 
-	if (cur == NULL || (h->keycmp(h, key, cur->key) != 0))
+	if (!cur || (h->keycmp(h, key, cur->key) != 0))
 		return NULL;
 
 	return cur->datum;
@@ -106,7 +108,7 @@ void hashtab_destroy(struct hashtab *h)
 		while (cur) {
 			temp = cur;
 			cur = cur->next;
-			kfree(temp);
+			kmem_cache_free(hashtab_node_cachep, temp);
 		}
 		h->htable[i] = NULL;
 	}
@@ -165,4 +167,11 @@ void hashtab_stat(struct hashtab *h, struct hashtab_info *info)
 
 	info->slots_used = slots_used;
 	info->max_chain_len = max_chain_len;
+}
+
+void __init hashtab_cache_init(void)
+{
+		hashtab_node_cachep = kmem_cache_create("hashtab_node",
+			sizeof(struct hashtab_node),
+			0, SLAB_PANIC, NULL);
 }

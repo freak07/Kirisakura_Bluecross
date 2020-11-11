@@ -1,7 +1,6 @@
 /*
- * Copyright (c) 2011, 2014-2016 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011, 2014-2019 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
  *
  * Permission to use, copy, modify, and/or distribute this software for
@@ -19,12 +18,6 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
- */
-
 #ifndef __WLAN_TGT_DEF_CONFIG_H__
 #define __WLAN_TGT_DEF_CONFIG_H__
 
@@ -39,7 +32,8 @@
 #define CFG_TGT_NUM_VDEV                4
 
 /*
- * We would need 1 AST entry per peer. Scale it by a factor of 2 to minimize hash collisions.
+ * We would need 1 AST entry per peer. Scale it by a
+ * factor of 2 to minimize hash collisions.
  * TODO: This scaling factor would be taken care inside the WAL in the future.
  */
 #define CFG_TGT_NUM_PEER_AST            2
@@ -72,7 +66,7 @@
  * In offload mode target supports features like WOW, chatter and other
  * protocol offloads. In order to support them some functionalities like
  * reorder buffering, PN checking need to be done in target. This determines
- * maximum number of peers suported by target in offload mode
+ * maximum number of peers supported by target in offload mode
  */
 
 /*
@@ -91,7 +85,7 @@
  * to allocate buffers for self peer and offload peer independently.
  */
 
-#define CFG_TGT_NUM_OFFLOAD_PEERS       (CFG_TGT_NUM_VDEV+1)
+#define CFG_TGT_NUM_OFFLOAD_PEERS       (CFG_TGT_NUM_VDEV + 1)
 
 /*
  * Number of reorder buffers used in offload mode
@@ -135,13 +129,22 @@
 #define CFG_TGT_DEFAULT_BMISS_OFFLOAD_MAX_VDEV   0x3
 
 /* maximum number of VDEV offload Roaming to support */
+#ifndef CFG_TGT_DEFAULT_ROAM_OFFLOAD_MAX_VDEV
 #define CFG_TGT_DEFAULT_ROAM_OFFLOAD_MAX_VDEV   0x3
+#endif
+
+/* maximum number of STA VDEVs */
+#ifndef CFG_TGT_DEFAULT_MAX_STA_VDEVS
+#define CFG_TGT_DEFAULT_MAX_STA_VDEVS 0
+#endif
 
 /* maximum number of AP profiles pushed to offload Roaming */
 #define CFG_TGT_DEFAULT_ROAM_OFFLOAD_MAX_PROFILES   0x8
 
 /* maximum number of VDEV offload GTK to support */
+#ifndef CFG_TGT_DEFAULT_GTK_OFFLOAD_MAX_VDEV
 #define CFG_TGT_DEFAULT_GTK_OFFLOAD_MAX_VDEV   0x3
+#endif
 
 /* default: mcast->ucast disabled if ATH_SUPPORT_MCAST2UCAST not defined */
 #ifndef ATH_SUPPORT_MCAST2UCAST
@@ -178,7 +181,9 @@
 /*
  * total number of descriptors to use in the target
  */
+#ifndef CFG_TGT_NUM_MSDU_DESC
 #define CFG_TGT_NUM_MSDU_DESC    (1024 + 32)
+#endif
 
 /*
  * Maximum number of frag table entries
@@ -198,7 +203,9 @@
 /*
  * number of peers that each Tdls vdev can track
  */
+#ifndef CFG_TGT_NUM_TDLS_CONN_TABLE_ENTRIES
 #define CFG_TGT_NUM_TDLS_CONN_TABLE_ENTRIES   8
+#endif
 
 /*
  * number of TDLS concurrent sleep STAs

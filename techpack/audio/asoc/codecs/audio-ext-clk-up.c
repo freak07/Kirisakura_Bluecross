@@ -23,6 +23,7 @@
 #include <linux/of_gpio.h>
 #include <dt-bindings/clock/qcom,audio-ext-clk.h>
 #include <dsp/q6afe-v2.h>
+#include <dsp/q6core.h>
 #include "audio-ext-clk-up.h"
 
 enum audio_clk_mux {
@@ -176,6 +177,20 @@ static int audio_ext_lpass_mclk_prepare(struct clk_hw *hw)
 	struct audio_ext_lpass_mclk *audio_lpass_mclk = to_audio_lpass_mclk(hw);
 	struct pinctrl_info *pnctrl_info = &audio_lpass_mclk->pnctrl_info;
 	int ret;
+	unsigned long timeout;
+
+	if (!q6core_is_adsp_ready()) {
+		pr_debug("ADSP isn't ready\n");
+		timeout = jiffies +
+			msecs_to_jiffies(2 * 100);
+		while (!time_after(jiffies, timeout)) {
+			if (!q6core_is_adsp_ready()) {
+				pr_info("ADSP isn't ready\n");
+			} else {
+				pr_debug("ADSP is ready\n");
+			}
+		}
+	}
 
 	lpass_mclk.enable = 1;
 	ret = afe_set_lpass_clock_v2(AFE_PORT_ID_PRIMARY_MI2S_RX,

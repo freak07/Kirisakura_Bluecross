@@ -8015,18 +8015,6 @@ int wlan_hdd_cfg80211_start_bss(hdd_adapter_t *pHostapdAdapter,
 	}
 
 	/*
-	 * Reject start bss if reassoc in progress on any adapter.
-	 * sme_is_any_session_in_middle_of_roaming is for LFR2 and
-	 * hdd_is_roaming_in_progress is for LFR3
-	 */
-	if (sme_is_any_session_in_middle_of_roaming(hHal) ||
-	    hdd_is_roaming_in_progress(pHddCtx)) {
-		hdd_info("Reassociation in progress");
-		ret = -EINVAL;
-		goto ret_status;
-	}
-
-	/*
 	 * Disable Roaming on all adapters before starting bss
 	 */
 	wlan_hdd_disable_roaming(pHostapdAdapter);

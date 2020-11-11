@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2020 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -1068,6 +1068,7 @@ static void hdd_update_wiphy_vhtcap(hdd_context_t *hdd_ctx)
 	struct ieee80211_supported_band *band_5g =
 		hdd_ctx->wiphy->bands[NL80211_BAND_5GHZ];
 	uint32_t val;
+	uint32_t value1;
 
 	if (!band_5g) {
 		hdd_debug("5GHz band disabled, skipping capability population");
@@ -1083,6 +1084,12 @@ static void hdd_update_wiphy_vhtcap(hdd_context_t *hdd_ctx)
 
 	hdd_info("Updated wiphy vhtcap:0x%x, CSNAntSupp:%d, NumSoundDim:%d",
 		band_5g->vht_cap.cap, hdd_ctx->config->txBFCsnValue, val);
+	sme_cfg_get_int(hdd_ctx->hHal, WNI_CFG_VHT_RX_MCS_MAP, &value1);
+	band_5g->vht_cap.vht_mcs.rx_mcs_map = value1;
+
+	sme_cfg_get_int(hdd_ctx->hHal, WNI_CFG_VHT_TX_MCS_MAP, &value1);
+	band_5g->vht_cap.vht_mcs.tx_mcs_map = value1;
+
 }
 
 /**
@@ -1169,30 +1176,9 @@ static void hdd_update_tgt_ht_cap(hdd_context_t *hdd_ctx,
 
 	enable_tx_stbc = pconfig->enableTxSTBC;
 
-	if (pconfig->enable2x2 && (cfg->num_rf_chains == 2)) {
+	if (pconfig->enable2x2 && (cfg->num_rf_chains == 2))
 		pconfig->enable2x2 = 1;
-	} else {
-		pconfig->enable2x2 = 0;
-		enable_tx_stbc = 0;
 
-		/* 1x1 */
-		/* Update Rx Highest Long GI data Rate */
-		if (sme_cfg_set_int(hdd_ctx->hHal,
-				    WNI_CFG_VHT_RX_HIGHEST_SUPPORTED_DATA_RATE,
-				    VHT_RX_HIGHEST_SUPPORTED_DATA_RATE_1_1)
-				== QDF_STATUS_E_FAILURE) {
-			hdd_err("Could not pass on WNI_CFG_VHT_RX_HIGHEST_SUPPORTED_DATA_RATE to CCM");
-		}
-
-		/* Update Tx Highest Long GI data Rate */
-		if (sme_cfg_set_int
-			    (hdd_ctx->hHal,
-			     WNI_CFG_VHT_TX_HIGHEST_SUPPORTED_DATA_RATE,
-			     VHT_TX_HIGHEST_SUPPORTED_DATA_RATE_1_1) ==
-			    QDF_STATUS_E_FAILURE) {
-			hdd_err("VHT_TX_HIGHEST_SUPP_RATE_1_1 to CCM fail");
-		}
-	}
 	if (!(cfg->ht_tx_stbc && pconfig->enable2x2))
 		enable_tx_stbc = 0;
 	phtCapInfo->txSTBC = enable_tx_stbc;
@@ -1238,11 +1224,53 @@ static void hdd_update_tgt_vht_cap(hdd_context_t *hdd_ctx,
 	uint32_t ch_width = eHT_CHANNEL_WIDTH_80MHZ;
 	uint32_t hw_rx_ldpc_enabled;
 	struct wma_caps_per_phy caps_per_phy;
+	uint32_t tx_highest_data_rate;
+	uint32_t rx_highest_data_rate;
 
 	if (!band_5g) {
 		hdd_debug("5GHz band disabled, skipping capability population");
 		return;
 	}
+
+	if (pconfig->enable2x2) {
+		if (cfg->vht_short_gi_80 & WMI_VHT_CAP_SGI_80MHZ) {
+			/* Update 2x2 Highest Short GI data rate */
+			tx_highest_data_rate =
+				VHT_TX_HIGHEST_SUPPORTED_DATA_RATE_2_2_SGI80;
+			rx_highest_data_rate =
+				VHT_RX_HIGHEST_SUPPORTED_DATA_RATE_2_2_SGI80;
+		} else {
+			/* Update 2x2 Rx Highest Long GI data Rate */
+			tx_highest_data_rate =
+					VHT_TX_HIGHEST_SUPPORTED_DATA_RATE_2_2;
+			rx_highest_data_rate =
+					VHT_RX_HIGHEST_SUPPORTED_DATA_RATE_2_2;
+		}
+	} else if (cfg->vht_short_gi_80 & WMI_VHT_CAP_SGI_80MHZ) {
+		/* Update 1x1 Highest Short GI data rate */
+		tx_highest_data_rate =
+				VHT_TX_HIGHEST_SUPPORTED_DATA_RATE_1_1_SGI80;
+		rx_highest_data_rate =
+				VHT_RX_HIGHEST_SUPPORTED_DATA_RATE_1_1_SGI80;
+	} else {
+		 /* Update 1x1 Highest Long GI data rate */
+		tx_highest_data_rate = VHT_TX_HIGHEST_SUPPORTED_DATA_RATE_1_1;
+		rx_highest_data_rate = VHT_RX_HIGHEST_SUPPORTED_DATA_RATE_1_1;
+	}
+
+	status = sme_cfg_set_int(hdd_ctx->hHal,
+				 WNI_CFG_VHT_RX_HIGHEST_SUPPORTED_DATA_RATE,
+				 rx_highest_data_rate);
+
+	if (!QDF_IS_STATUS_SUCCESS(status))
+		hdd_err("Failed to set rx_supp_data_rate");
+
+	status = sme_cfg_set_int(hdd_ctx->hHal,
+				 WNI_CFG_VHT_TX_HIGHEST_SUPPORTED_DATA_RATE,
+				 tx_highest_data_rate);
+
+	if (!QDF_IS_STATUS_SUCCESS(status))
+		hdd_err("Failed to set tx_supp_data_rate");
 
 	/* Get the current MPDU length */
 	status =
@@ -1587,6 +1615,8 @@ static void hdd_update_tgt_vht_cap(hdd_context_t *hdd_ctx,
 	if (cfg->vht_txop_ps & WMI_VHT_CAP_TXOP_PS)
 		band_5g->vht_cap.cap |= IEEE80211_VHT_CAP_VHT_TXOP_PS;
 
+	band_5g->vht_cap.vht_mcs.rx_highest = cpu_to_le16(rx_highest_data_rate);
+	band_5g->vht_cap.vht_mcs.tx_highest = cpu_to_le16(tx_highest_data_rate);
 }
 
 /**
@@ -4711,6 +4741,18 @@ QDF_STATUS hdd_stop_adapter(hdd_context_t *hdd_ctx, hdd_adapter_t *adapter,
 		 */
 		if (true == bCloseSession)
 			hdd_wait_for_sme_close_sesion(hdd_ctx, adapter, false);
+		break;
+
+	case QDF_MONITOR_MODE:
+		wlan_hdd_scan_abort(adapter);
+		hdd_deregister_tx_flow_control(adapter);
+
+		/*
+		 * It is possible that the caller of this function does not
+		 * wish to close the session
+		 */
+		if (bCloseSession)
+			hdd_wait_for_sme_close_sesion(hdd_ctx, adapter, true);
 		break;
 
 	case QDF_SAP_MODE:
@@ -8504,8 +8546,6 @@ static int hdd_context_init(hdd_context_t *hdd_ctx)
 
 	hdd_ctx->ioctl_scan_mode = eSIR_ACTIVE_SCAN;
 	hdd_ctx->max_intf_count = CSR_ROAM_SESSION_MAX;
-
-	hdd_init_ll_stats_ctx();
 
 	init_completion(&hdd_ctx->chain_rssi_context.response_event);
 	init_completion(&hdd_ctx->mc_sus_event_var);

@@ -1076,8 +1076,9 @@ hdd_send_ft_assoc_response(struct net_device *dev,
 	unsigned int len = 0;
 	u8 *pFTAssocRsp = NULL;
 
-	if (pCsrRoamInfo->nAssocRspLength == 0) {
-		hdd_debug("assoc rsp length is 0");
+	if (pCsrRoamInfo->nAssocRspLength < FT_ASSOC_RSP_IES_OFFSET) {
+		hdd_debug("Invalid assoc rsp length %d",
+			  pCsrRoamInfo->nAssocRspLength);
 		return;
 	}
 
@@ -1094,15 +1095,20 @@ hdd_send_ft_assoc_response(struct net_device *dev,
 		   (unsigned int)pFTAssocRsp[0],
 		   (unsigned int)pFTAssocRsp[1]);
 
+	/* Send the Assoc Resp, the supplicant needs this for initial Auth. */
+	len = pCsrRoamInfo->nAssocRspLength - FT_ASSOC_RSP_IES_OFFSET;
+	if (len > IW_GENERIC_IE_MAX) {
+		hdd_err("Invalid Assoc resp length %d", len);
+		return;
+	}
+	wrqu.data.length = len;
+
 	/* We need to send the IEs to the supplicant. */
 	buff = qdf_mem_malloc(IW_GENERIC_IE_MAX);
 	if (buff == NULL) {
 		hdd_err("unable to allocate memory");
 		return;
 	}
-	/* Send the Assoc Resp, the supplicant needs this for initial Auth. */
-	len = pCsrRoamInfo->nAssocRspLength - FT_ASSOC_RSP_IES_OFFSET;
-	wrqu.data.length = len;
 	memcpy(buff, pFTAssocRsp, len);
 	wireless_send_event(dev, IWEVASSOCRESPIE, &wrqu, buff);
 
@@ -1824,11 +1830,13 @@ static QDF_STATUS hdd_dis_connect_handler(hdd_adapter_t *pAdapter,
 	 * eConnectionState_Connecting state mean that connection is in
 	 * progress so no need to set state to eConnectionState_NotConnected
 	 */
-	if ((eConnectionState_Connecting !=
-	    pHddStaCtx->conn_info.connState)) {
+	if (eConnectionState_Connecting != pHddStaCtx->conn_info.connState)
 		hdd_conn_set_connection_state(pAdapter,
 					      eConnectionState_NotConnected);
-	}
+
+	/* Clear roaming in progress flag */
+	hdd_set_roaming_in_progress(false);
+
 #ifdef WLAN_FEATURE_GTK_OFFLOAD
 	if ((QDF_STA_MODE == pAdapter->device_mode) ||
 	    (QDF_P2P_CLIENT_MODE == pAdapter->device_mode)) {
@@ -2202,8 +2210,9 @@ static void hdd_send_re_assoc_event(struct net_device *dev,
 		goto done;
 	}
 
-	if (pCsrRoamInfo->nAssocRspLength == 0) {
-		hdd_err("Assoc rsp length is 0");
+	if (pCsrRoamInfo->nAssocRspLength < FT_ASSOC_RSP_IES_OFFSET) {
+		hdd_err("Invalid assoc rsp length %d",
+			pCsrRoamInfo->nAssocRspLength);
 		goto done;
 	}
 
@@ -2233,6 +2242,10 @@ static void hdd_send_re_assoc_event(struct net_device *dev,
 
 	/* Send the Assoc Resp, the supplicant needs this for initial Auth */
 	len = pCsrRoamInfo->nAssocRspLength - FT_ASSOC_RSP_IES_OFFSET;
+	if (len > IW_GENERIC_IE_MAX) {
+		hdd_err("Invalid Assoc resp length %d", len);
+		goto done;
+	}
 	rspRsnLength = len;
 	qdf_mem_copy(rspRsnIe, pFTAssocRsp, len);
 	qdf_mem_zero(rspRsnIe + len, IW_GENERIC_IE_MAX - len);
@@ -6086,6 +6099,10 @@ int hdd_set_csr_auth_type(hdd_adapter_t *pAdapter, eCsrAuthType RSNAuthType)
 					RSNAuthType;
 				hdd_debug("updated profile authtype as %d",
 					RSNAuthType);
+			} else if (RSNAuthType ==  eCSR_AUTH_TYPE_SAE) {
+				/* SAE with open authentication case */
+				pRoamProfile->AuthType.authType[0] =
+					eCSR_AUTH_TYPE_SAE;
 			} else if ((RSNAuthType ==
 				  eCSR_AUTH_TYPE_SUITEB_EAP_SHA256) &&
 				  ((pWextState->

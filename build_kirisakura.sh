@@ -30,4 +30,4 @@ echo
 echo "Build The Good Stuff"
 echo 
 
-make CC=clang O=out -j4
+make CC=clang O=out -j24

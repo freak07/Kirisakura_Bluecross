@@ -3386,7 +3386,6 @@ int sockev_unregister_notify(struct notifier_block *nb)
 }
 EXPORT_SYMBOL(sockev_unregister_notify);
 
-
 /* This routine returns the IP overhead imposed by a socket i.e.
  * the length of the underlying IP header, depending on whether
  * this is an IPv4 or IPv6 socket and the length from IP options turned

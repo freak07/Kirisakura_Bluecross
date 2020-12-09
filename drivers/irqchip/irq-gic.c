@@ -338,7 +338,7 @@ static int gic_set_affinity(struct irq_data *d, const struct cpumask *mask_val,
 	if (cpu >= NR_GIC_CPU_IF || cpu >= nr_cpu_ids)
 		return -EINVAL;
 
-	writeb_relaxed_no_log(gic_cpu_map[cpu], reg);
+	writeb_relaxed(gic_cpu_map[cpu], reg);
 
 	return IRQ_SET_MASK_OK_DONE;
 }

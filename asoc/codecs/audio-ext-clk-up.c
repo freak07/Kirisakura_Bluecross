@@ -310,6 +310,21 @@ static const struct clk_ops audio_ext_lpass_mclk2_ops = {
 	.unprepare = audio_ext_lpass_mclk2_unprepare,
 };
 
+static int audio_ext_clk_dummy_prepare(struct clk_hw *hw)
+{
+       return 0;
+}
+
+static void audio_ext_clk_dummy_unprepare(struct clk_hw *hw)
+{
+
+}
+
+static const struct clk_ops audio_ext_clk_dummy_ops = {
+       .prepare = audio_ext_clk_dummy_prepare,
+       .unprepare = audio_ext_clk_dummy_unprepare,
+};
+
 static struct audio_ext_pmi_clk audio_pmi_clk = {
 	.gpio = -EINVAL,
 	.fact = {
@@ -333,7 +348,7 @@ static struct audio_ext_pmi_clk audio_pmi_lnbb_clk = {
 			.name = "audio_ext_pmi_lnbb_clk",
 			.parent_names = (const char *[]){ "ln_bb_clk3" },
 			.num_parents = 1,
-			.ops = &clk_dummy_ops,
+			.ops = &audio_ext_clk_dummy_ops,
 		},
 	},
 };

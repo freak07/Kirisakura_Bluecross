@@ -220,6 +220,18 @@ typedef enum {
 
 #endif
 
+/* RSN capabilities structure */
+
+struct rsn_caps {
+	uint16_t PreAuthSupported:1;
+	uint16_t NoPairwise:1;
+	uint16_t PTKSAReplayCounter:2;
+	uint16_t GTKSAReplayCounter:2;
+	uint16_t MFPRequired:1;
+	uint16_t MFPCapable:1;
+	uint16_t Reserved:8;
+};
+
 /**
  * enum sir_roam_op_code - Operation to be done by the callback.
  * @SIR_ROAM_SYNCH_PROPAGATION: Propagate the new BSS info after roaming.
@@ -3702,6 +3714,7 @@ typedef struct sSirRoamOffloadScanReq {
 	struct roam_fils_params roam_fils_params;
 #endif
 	struct scoring_param score_params;
+	struct rsn_caps rsn_caps;
 	struct wmi_11k_offload_params offload_11k_params;
 } tSirRoamOffloadScanReq, *tpSirRoamOffloadScanReq;
 

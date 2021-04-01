@@ -3676,6 +3676,7 @@ uint8_t csr_construct_rsn_ie(tHalHandle hHal, uint32_t sessionId,
 						   pProfile->nRSNReqIELength -2,
 						   &rsn_ie, false);
 			if (DOT11F_SUCCEEDED(ret)) {
+				session->rsn_caps = *(struct rsn_caps *)rsn_ie.RSN_Cap;
 				pIesLocal->RSN.RSN_Cap[0] =
 						pIesLocal->RSN.RSN_Cap[0] &
 						rsn_ie.RSN_Cap[0];
@@ -3738,8 +3739,6 @@ uint8_t csr_construct_rsn_ie(tHalHandle hHal, uint32_t sessionId,
 
 		pPMK = (tCsrRSNPMKIe *) (((uint8_t *) (&pAuthSuite->AuthOui[1]))
 				+ sizeof(uint16_t));
-		/* Store RSN capabilities in session */
-		session->rsn_caps = RSNCapabilities;
 		if (!csr_update_pmksa_for_cache_id(pSirBssDesc,
 			pProfile, &pmkid_cache))
 			qdf_mem_copy(pmkid_cache.BSSID.bytes,

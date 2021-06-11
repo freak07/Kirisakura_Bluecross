@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2018, 2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2018, 2020-2021 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -15302,6 +15302,12 @@ static int __wlan_hdd_cfg80211_add_key(struct wiphy *wiphy,
 	QDF_STATUS qdf_ret_status;
 	hdd_context_t *pHddCtx;
 	hdd_ap_ctx_t *ap_ctx = WLAN_HDD_GET_AP_CTX_PTR(pAdapter);
+	ol_txrx_pdev_handle pdev = cds_get_context(QDF_MODULE_ID_TXRX);
+
+	if (!pdev) {
+		hdd_err("DP pdev is NULL");
+		return -EINVAL;
+	}
 
 	ENTER();
 
@@ -15465,6 +15471,10 @@ static int __wlan_hdd_cfg80211_add_key(struct wiphy *wiphy,
 		setKey.keyDirection = eSIR_TX_RX;
 		qdf_mem_copy(setKey.peerMac.bytes, mac_addr, QDF_MAC_ADDR_SIZE);
 	}
+
+	ol_txrx_peer_flush_frags(pdev, pAdapter->sessionId,
+				 setKey.peerMac.bytes);
+
 	if ((QDF_IBSS_MODE == pAdapter->device_mode) && !pairwise) {
 		/* if a key is already installed, block all subsequent ones */
 		if (pAdapter->sessionCtx.station.ibss_enc_key_installed) {

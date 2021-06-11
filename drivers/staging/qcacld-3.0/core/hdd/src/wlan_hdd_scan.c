@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2018, 2021 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -810,19 +810,25 @@ static void hdd_scan_inactivity_timer_handler(unsigned long scan_req)
 }
 
 /**
- * wlan_hdd_scan_request_enqueue() - enqueue Scan Request
+ * wlan_hdd_schedule_scan_request() - Schedule Scan Request
  * @adapter: Pointer to the adapter
  * @scan_req: Pointer to the scan request
+ * @source: source of scan request either vendor or nl
+ * @csr_scan_req: Pointer to CSR scan request
+ * @dev: Pointer to net device structure
+ * @callback: Scan request/complete callback
  *
- * Enqueue scan request in the global HDD scan list.This list
- * stores the active scan request information.
+ * Schedule scan start request and enqueue scan request in the global
+ * HDD scan list.This list stores the active scan request information.
  *
  * Return: 0 on success, error number otherwise
  */
-static int wlan_hdd_scan_request_enqueue(hdd_adapter_t *adapter,
+static int wlan_hdd_schedule_scan_request(
+			hdd_adapter_t *adapter,
 			struct cfg80211_scan_request *scan_req,
-			uint8_t source, uint32_t scan_id,
-			uint32_t timestamp)
+			uint8_t source, tCsrScanRequest csr_scan_req,
+			struct net_device *dev,
+			csr_scan_completeCallback callback)
 {
 	hdd_context_t *hdd_ctx = WLAN_HDD_GET_CTX(adapter);
 	struct hdd_scan_req *hdd_scan_req;
@@ -838,20 +844,24 @@ static int wlan_hdd_scan_request_enqueue(hdd_adapter_t *adapter,
 	hdd_scan_req->adapter = adapter;
 	hdd_scan_req->scan_request = scan_req;
 	hdd_scan_req->source = source;
-	hdd_scan_req->scan_id = scan_id;
-	hdd_scan_req->timestamp = timestamp;
+	hdd_scan_req->scan_id = csr_scan_req.scan_id;
+	hdd_scan_req->timestamp = csr_scan_req.timestamp;
 	if (scan_req != NULL)
 		hdd_scan_req->scan_req_flags = scan_req->flags;
 	else
 		hdd_scan_req->scan_req_flags = 0;
 
 	qdf_spin_lock(&hdd_ctx->hdd_scan_req_q_lock);
-	status = qdf_list_insert_back(&hdd_ctx->hdd_scan_req_q,
-					&hdd_scan_req->node);
+	status = sme_scan_request(WLAN_HDD_GET_HAL_CTX(adapter),
+				  adapter->sessionId, &csr_scan_req,
+				  callback, dev);
+	if (QDF_STATUS_SUCCESS == status)
+		qdf_list_insert_back(&hdd_ctx->hdd_scan_req_q,
+				     &hdd_scan_req->node);
 	qdf_spin_unlock(&hdd_ctx->hdd_scan_req_q_lock);
 
 	if (QDF_STATUS_SUCCESS != status) {
-		hdd_err("Failed to enqueue Scan Req");
+		hdd_err("scan req failed with error %d", status);
 		qdf_mem_free(hdd_scan_req);
 		return -EINVAL;
 	}
@@ -1029,9 +1039,6 @@ static int __iw_set_scan(struct net_device *dev, struct iw_request_info *info,
 	hdd_adapter_t *con_sap_adapter;
 	uint16_t con_dfs_ch;
 	int ret;
-	uint8_t source;
-	struct cfg80211_scan_request *req;
-	uint32_t timestamp;
 
 	ENTER_DEV(dev);
 
@@ -1151,16 +1158,11 @@ static int __iw_set_scan(struct net_device *dev, struct iw_request_info *info,
 	scanRequest.timestamp = qdf_mc_timer_get_system_time();
 	wma_get_scan_id(&scanRequest.scan_id);
 	pAdapter->scan_info.mScanPending = true;
-	wlan_hdd_scan_request_enqueue(pAdapter, NULL, NL_SCAN,
-			scanRequest.scan_id,
-			scanRequest.timestamp);
-	status = sme_scan_request((WLAN_HDD_GET_CTX(pAdapter))->hHal,
-				  pAdapter->sessionId, &scanRequest,
-				  &hdd_scan_request_callback, dev);
+	status = wlan_hdd_schedule_scan_request(pAdapter, NULL, NL_SCAN,
+						scanRequest, dev,
+						&hdd_scan_request_callback);
 	if (!QDF_IS_STATUS_SUCCESS(status)) {
 		hdd_err("sme_scan_request  fail %d!!!", status);
-		wlan_hdd_scan_request_dequeue(hdd_ctx, scanRequest.scan_id,
-			&req, &source, &timestamp);
 		pAdapter->scan_info.mScanPending = false;
 		goto error;
 	}
@@ -2022,8 +2024,6 @@ static int __wlan_hdd_cfg80211_scan(struct wiphy *wiphy,
 	uint8_t curr_session_id;
 	scan_reject_states curr_reason;
 	static uint32_t scan_ebusy_cnt;
-	struct cfg80211_scan_request *req;
-	uint32_t timestamp;
 	uint32_t scan_req_id;
 
 	ENTER();
@@ -2476,12 +2476,10 @@ static int __wlan_hdd_cfg80211_scan(struct wiphy *wiphy,
 	qdf_runtime_pm_prevent_suspend(&pHddCtx->runtime_context.scan);
 	wma_get_scan_id(&scan_req_id);
 	scan_req.scan_id = scan_req_id;
-	wlan_hdd_scan_request_enqueue(pAdapter, request, source,
-			scan_req.scan_id, scan_req.timestamp);
 	pAdapter->scan_info.mScanPending = true;
-	status = sme_scan_request(WLAN_HDD_GET_HAL_CTX(pAdapter),
-				pAdapter->sessionId, &scan_req,
-				&hdd_cfg80211_scan_done_callback, dev);
+	status = wlan_hdd_schedule_scan_request(
+				pAdapter, request, source, scan_req, dev,
+				&hdd_cfg80211_scan_done_callback);
 
 	if (QDF_STATUS_SUCCESS != status) {
 		hdd_err_ratelimited(HDD_SCAN_REJECT_RATE_LIMIT,
@@ -2495,9 +2493,6 @@ static int __wlan_hdd_cfg80211_scan(struct wiphy *wiphy,
 		} else {
 			status = -EIO;
 		}
-		wlan_hdd_scan_request_dequeue(pHddCtx, scan_req.scan_id,
-				&req, &source,
-				&timestamp);
 		pAdapter->scan_info.mScanPending = false;
 		qdf_runtime_pm_allow_suspend(&pHddCtx->runtime_context.scan);
 		hdd_allow_suspend(WIFI_POWER_EVENT_WAKELOCK_SCAN);

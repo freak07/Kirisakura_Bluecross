@@ -2273,7 +2273,7 @@ QDF_STATUS send_set_p2pgo_noa_req_cmd_tlv(wmi_unified_t wmi_handle,
 	noa_discriptor->interval = noa->interval;
 	noa_discriptor->start_time = 0;
 
-	WMI_LOGI("SET P2P GO NOA:vdev_id:%d count:%d duration:%d interval:%d",
+	WMI_LOGD("SET P2P GO NOA:vdev_id:%d count:%d duration:%d interval:%d",
 		 cmd->vdev_id, noa->count, noa_discriptor->duration,
 		 noa->interval);
 	status = wmi_unified_cmd_send(wmi_handle, buf, len,
@@ -2321,7 +2321,7 @@ QDF_STATUS send_set_p2pgo_oppps_req_cmd_tlv(wmi_unified_t wmi_handle,
 		WMI_UNIFIED_OPPPS_ATTR_ENABLED_SET(cmd);
 
 	WMI_UNIFIED_OPPPS_ATTR_CTWIN_SET(cmd, oppps->ctwindow);
-	WMI_LOGI("SET P2P GO OPPPS:vdev_id:%d ctwindow:%d",
+	WMI_LOGD("SET P2P GO OPPPS:vdev_id:%d ctwindow:%d",
 		 cmd->vdev_id, oppps->ctwindow);
 	status = wmi_unified_cmd_send(wmi_handle, buf, sizeof(*cmd),
 				      WMI_P2P_SET_OPPPS_PARAM_CMDID);
@@ -6275,7 +6275,7 @@ QDF_STATUS wmi_get_buf_extscan_start_cmd(wmi_unified_t wmi_handle,
 	cmd->configuration_flags = 0;
 	if (pstart->configuration_flags & WMI_EXTSCAN_LP_EXTENDED_BATCHING)
 		cmd->configuration_flags |= WMI_EXTSCAN_EXTENDED_BATCHING_EN;
-	WMI_LOGI("%s: configuration_flags: 0x%x", __func__,
+	WMI_LOGD("%s: configuration_flags: 0x%x", __func__,
 			cmd->configuration_flags);
 #ifdef FEATURE_WLAN_EXTSCAN
 	cmd->min_rest_time = WMI_EXTSCAN_REST_TIME;
@@ -6381,7 +6381,7 @@ QDF_STATUS wmi_get_buf_extscan_start_cmd(wmi_unified_t wmi_handle,
 			dest_blist->configuration_flags =
 				WMI_EXTSCAN_BUCKET_CACHE_RESULTS;
 
-		WMI_LOGI("%s: ntfy_extscan_events:%u cfg_flags:%u fwd_flags:%u",
+		WMI_LOGD("%s: ntfy_extscan_events:%u cfg_flags:%u fwd_flags:%u",
 			__func__, dest_blist->notify_extscan_events,
 			dest_blist->configuration_flags,
 			dest_blist->forwarding_flags);
@@ -10761,7 +10761,7 @@ QDF_STATUS send_log_supported_evt_cmd_tlv(wmi_unified_t wmi_handle,
 	WMI_DIAG_EVENT_LOG_SUPPORTED_EVENTID_param_tlvs *param_buf;
 	wmi_diag_event_log_supported_event_fixed_params *wmi_event;
 
-	WMI_LOGI("Received WMI_DIAG_EVENT_LOG_SUPPORTED_EVENTID");
+	WMI_LOGD("Received WMI_DIAG_EVENT_LOG_SUPPORTED_EVENTID");
 
 	param_buf = (WMI_DIAG_EVENT_LOG_SUPPORTED_EVENTID_param_tlvs *) event;
 	if (!param_buf) {
@@ -11699,10 +11699,10 @@ QDF_STATUS send_unit_test_cmd_tlv(wmi_unified_t wmi_handle,
 	WMITLV_SET_HDR(buf_ptr, WMITLV_TAG_ARRAY_UINT32,
 		       (wmi_utest->num_args * sizeof(uint32_t)));
 	unit_test_cmd_args = (A_UINT32 *) (buf_ptr + WMI_TLV_HDR_SIZE);
-	WMI_LOGI("%s: %d num of args = ", __func__, wmi_utest->num_args);
+	WMI_LOGD("%s: %d num of args = ", __func__, wmi_utest->num_args);
 	for (i = 0; (i < wmi_utest->num_args && i < WMI_MAX_NUM_ARGS); i++) {
 		unit_test_cmd_args[i] = wmi_utest->args[i];
-		WMI_LOGI("%d,", wmi_utest->args[i]);
+		WMI_LOGD("%d,", wmi_utest->args[i]);
 	}
 	if (wmi_unified_cmd_send(wmi_handle, wmi_buf, len,
 				 WMI_UNIT_TEST_CMDID)) {
@@ -12658,10 +12658,10 @@ QDF_STATUS send_power_dbg_cmd_tlv(wmi_unified_t wmi_handle,
 	WMITLV_SET_HDR(buf_ptr, WMITLV_TAG_ARRAY_UINT32,
 		       (param->num_args * sizeof(uint32_t)));
 	cmd_args = (uint32_t *) (buf_ptr + WMI_TLV_HDR_SIZE);
-	WMI_LOGI("%s: %d num of args = ", __func__, param->num_args);
+	WMI_LOGD("%s: %d num of args = ", __func__, param->num_args);
 	for (i = 0; (i < param->num_args && i < WMI_MAX_NUM_ARGS); i++) {
 		cmd_args[i] = param->args[i];
-		WMI_LOGI("%d,", param->args[i]);
+		WMI_LOGD("%d,", param->args[i]);
 	}
 
 	status = wmi_unified_cmd_send(wmi_handle, buf,
@@ -13997,7 +13997,7 @@ static QDF_STATUS send_vdev_spectral_enable_cmd_tlv(wmi_unified_t wmi_handle,
 	cmd->trigger_cmd = param->active;
 	cmd->enable_cmd = param->enabled;
 
-	WMI_LOGE("%s: vdev_id=%d, trigger_cmd=%d, enable_cmd=%d",
+	WMI_LOGD("%s: vdev_id=%d, trigger_cmd=%d, enable_cmd=%d",
 		 __func__, cmd->vdev_id, cmd->trigger_cmd, cmd->enable_cmd);
 
 	status = wmi_unified_cmd_send(wmi_handle, buf, len,

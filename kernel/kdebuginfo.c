@@ -14,6 +14,7 @@
 #include <linux/io.h>
 #include <linux/of_address.h>
 #include <linux/bldr_debug_tools.h>
+#include <linux/utsname.h>
 
 /*
  * These will be re-linked against their real values
@@ -38,6 +39,12 @@ extern const u16 kallsyms_token_index[] __weak;
 
 extern const unsigned long kallsyms_markers[] __weak;
 
+static phys_addr_t all_info_addr;
+
+/*
+ * Header structure must be byte-packed, since the table is provided to
+ * bootloader.
+ */
 struct kernel_info {
 	/* For kallsyms */
 	u8 enabled_all;
@@ -70,23 +77,50 @@ struct kernel_info {
 	u64 page_offset;
 	u64 phys_offset;
 	u64 kimage_voffset;
-};
+
+	/* For linux banner */
+	u8 last_uts_release[__NEW_UTS_LEN];
+
+	/* For mmu table */
+	u64 swapper_pg_dir;
+
+	/* Info of running build */
+	char build_info[32];
+} __packed;
 
 struct kernel_all_info {
 	u32 magic_number;
 	u32 combined_checksum;
 	struct kernel_info info;
-};
+} __packed;
+
+static void update_all_info_toio(void __iomem *io_base,
+		struct kernel_all_info *all_info)
+{
+	int index;
+	struct kernel_info *info;
+	u32 *checksum_info;
+
+	all_info->magic_number = BOOT_DEBUG_MAGIC;
+	all_info->combined_checksum = 0;
+
+	info = &(all_info->info);
+	checksum_info = (u32 *)info;
+	for (index = 0; index < sizeof(*info)/sizeof(u32); index++)
+		all_info->combined_checksum ^= checksum_info[index];
+
+	memcpy_toio(io_base, all_info, sizeof(*all_info));
+}
 
 static void backup_kernel_info(void)
 {
 	struct device_node *np;
 	struct resource res;
-	struct kernel_all_info *all_info;
+	struct kernel_all_info all_info;
 	struct kernel_info *info;
-	u32 *checksum_info;
+	void __iomem *info_base;
 	int num_reg = 0;
-	int ret, index;
+	int ret;
 
 	np = of_find_compatible_node(NULL, NULL, "bootloader_kinfo");
 	if (!np) {
@@ -107,22 +141,18 @@ static void backup_kernel_info(void)
 		return;
 	}
 
-	ret = strcmp(res.name, "kinfo");
-	if (ret) {
-		pr_warn("%s: unexpected resource name %s, ret %d\n", __func__,
-				res.name, ret);
+	all_info_addr = res.start;
+
+	info_base = ioremap(res.start, resource_size(&res));
+	if (!info_base) {
+		pr_warn("%s: bootloader kernel info offset mapping failed\n",
+				__func__);
 		return;
 	}
 
-	all_info = (struct kernel_all_info *)
-			   ioremap(res.start, resource_size(&res));
-	if (!all_info) {
-		pr_warn("%s: failed to map kernel_all_info\n", __func__);
-		return;
-	}
-
-	memset_io(all_info, 0, resource_size(&res));
-	info = &(all_info->info);
+	memset(&all_info, 0, sizeof(all_info));
+	memset_io(info_base, 0, resource_size(&res));
+	info = &(all_info.info);
 	info->enabled_all = IS_ENABLED(CONFIG_KALLSYMS_ALL);
 	info->enabled_base_relative = IS_ENABLED(CONFIG_KALLSYMS_BASE_RELATIVE);
 	info->enabled_absolute_percpu =
@@ -150,19 +180,51 @@ static void backup_kernel_info(void)
 	info->page_offset = PAGE_OFFSET;
 	info->phys_offset = PHYS_OFFSET;
 	info->kimage_voffset = kimage_voffset;
+	strlcpy(info->last_uts_release, init_utsname()->release,
+			sizeof(info->last_uts_release));
+	info->swapper_pg_dir = (u64)swapper_pg_dir;
 
-	for (index = 0; index < sizeof(struct kernel_info)/sizeof(u32);
-		index++) {
-		checksum_info = (u32 *)info;
-		all_info->combined_checksum ^= checksum_info[index];
+	update_all_info_toio(info_base, &all_info);
+	iounmap(info_base);
+}
+
+static int build_info_set(const char *str, const struct kernel_param *kp)
+{
+	void __iomem *info_base;
+	struct kernel_all_info all_info;
+	const size_t build_info_size = sizeof(all_info.info.build_info);
+
+	if (all_info_addr == 0)
+		return -EPERM;
+
+	info_base = ioremap(all_info_addr, sizeof(all_info));
+	if (!info_base) {
+		pr_err("%s: Failed to map all_info\n", __func__);
+		return -EPERM;
 	}
 
-	all_info->magic_number = BOOT_DEBUG_MAGIC;
+	memcpy_fromio(&all_info, info_base, sizeof(all_info));
+	memcpy(&all_info.info.build_info, str,
+			min(build_info_size, strlen(str)));
+	update_all_info_toio(info_base, &all_info);
+	iounmap(info_base);
 
-	/* Ensure all information written to kernel_info is completed */
-	mb();
-	iounmap(all_info);
+	if (strlen(str) > build_info_size) {
+		pr_warn("%s: buffer too small (%zd bytes) for string '%s'\n",
+				__func__, build_info_size, str);
+		return -ENOMEM;
+	}
+
+	return 0;
 }
+
+static const struct kernel_param_ops build_info_op = {
+	.set = build_info_set,
+};
+
+module_param_cb(build_info, &build_info_op, NULL, 0200);
+MODULE_PARM_DESC(build_info,
+		"Write build info to field 'build_info' of kdebuginfo.");
 
 static int __init kdebuginfo_init(void)
 {

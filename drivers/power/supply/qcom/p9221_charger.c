@@ -1084,6 +1084,12 @@ static int p9221_get_property(struct power_supply *psy,
 			return -ENODATA;
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY:
+		/* Zero may be returned on transition to wireless "online", as
+		 * last_capacity is reset to -1 until capacity is re-written
+		 * from userspace, leading to a new csp packet being sent.
+		 *
+		 * b/80435107 for additional context
+		 */
 		if (charger->last_capacity > 0)
 			val->intval = charger->last_capacity;
 		else
@@ -1161,8 +1167,7 @@ static int p9221_set_property(struct power_supply *psy,
 		ret = p9221_send_csp(charger, charger->last_capacity);
 		if (ret)
 			dev_err(&charger->client->dev,
-				"Couldn't send csp: %d\n", ret);
-		changed = true;
+				"Could not send csp: %d\n", ret);
 
 		threshold = (charger->mitigate_threshold > 0) ?
 			    charger->mitigate_threshold :
@@ -1180,7 +1185,7 @@ static int p9221_set_property(struct power_supply *psy,
 				schedule_delayed_work(
 				    &charger->power_mitigation_work,
 				    msecs_to_jiffies(
-					P9221_POWER_MITIGATE_DELAY_MS));
+				    	P9221_POWER_MITIGATE_DELAY_MS));
 		}
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_MAX:

@@ -1037,7 +1037,7 @@ static int max1720x_get_battery_health(struct max1720x_chip *chip)
 
 	if (chip->health_status & MAX1720X_STATUS_TMX) {
 		chip->health_status &= ~MAX1720X_STATUS_TMX;
-		return POWER_SUPPLY_HEALTH_OVERHEAT;
+		return POWER_SUPPLY_HEALTH_HOT;
 	}
 
 	return POWER_SUPPLY_HEALTH_GOOD;
@@ -1722,7 +1722,7 @@ static irqreturn_t max1720x_fg_irq_thread_fn(int irq, void *obj)
 	pm_runtime_get_sync(chip->dev);
 	if (!chip->init_complete || !chip->resume_complete) {
 		pm_runtime_put_sync(chip->dev);
-		return -EAGAIN;
+		return IRQ_HANDLED;
 	}
 	pm_runtime_put_sync(chip->dev);
 	err = REGMAP_READ(chip->regmap, MAX1720X_STATUS, &fg_status);
@@ -2324,8 +2324,6 @@ static int max1720x_init_chip(struct max1720x_chip *chip)
 	(void) max1720x_handle_dt_nconvgcfg(chip);
 
 	chip->fake_capacity = -EINVAL;
-	chip->init_complete = true;
-	chip->resume_complete = true;
 
 	ret = REGMAP_READ(chip->regmap, MAX1720X_STATUS, &data);
 	if (!ret && data & MAX1720X_STATUS_BR) {
@@ -2650,6 +2648,8 @@ static void max1720x_init_work(struct work_struct *work)
 	(void)max1720x_init_history(chip);
 	chip->cycle_count = -1;
 	chip->fake_temp = 0;
+	chip->init_complete = true;
+	chip->resume_complete = true;
 
 	if (chip->psy)
 		power_supply_changed(chip->psy);

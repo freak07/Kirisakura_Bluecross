@@ -2410,6 +2410,10 @@ static int msm_geni_serial_probe(struct platform_device *pdev)
 	msm_geni_serial_debug_init(uport, is_console);
 #endif
 	dev_port->port_setup = false;
+
+	/* Set the flag to prevent to set up the console at runtime */
+	console_set_on_cmdline = 1;
+
 	return uart_add_one_port(drv, uport);
 
 exit_geni_serial_probe:

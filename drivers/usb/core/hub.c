@@ -4908,16 +4908,16 @@ retry_enum:
 		if (status < 0)
 			goto loop;
 
-		mutex_unlock(hcd->address0_mutex);
-		usb_unlock_port(port_dev);
-		retry_locked = false;
-
 		dev_speed = udev->speed;
 		if (udev->speed > USB_SPEED_UNKNOWN &&
 				udev->speed <= USB_SPEED_HIGH && hcd->usb_phy
 				&& hcd->usb_phy->disable_chirp)
 			hcd->usb_phy->disable_chirp(hcd->usb_phy,
 					false);
+
+		mutex_unlock(hcd->address0_mutex);
+		usb_unlock_port(port_dev);
+		retry_locked = false;
 
 		if (udev->quirks & USB_QUIRK_DELAY_INIT)
 			msleep(2000);
